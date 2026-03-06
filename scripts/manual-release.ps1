@@ -3,7 +3,8 @@ param(
     [string]$Version,
     [string]$Repo = "mauricioespinosa84-dotcom/TavariClient",
     [string]$Notes = "Release manual de Tavari Client.",
-    [string]$BundleDir = "src-tauri\\target\\release\\bundle\\nsis",
+    [string]$BundleDir = "src-tauri\\target\\x86_64-pc-windows-msvc\\release\\bundle\\nsis",
+    [string]$Target = "x86_64-pc-windows-msvc",
     [string]$OutDir,
     [switch]$SkipBuild
 )
@@ -23,6 +24,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 
 $exePath = Join-Path $rootDir "src-tauri\\target\\release\\tavari-client.exe"
+$targetExePath = Join-Path $rootDir "src-tauri\\target\\$Target\\release\\tavari-client.exe"
 $knownNsisPath = "C:\Program Files (x86)\NSIS"
 
 if ((Test-Path (Join-Path $knownNsisPath "makensis.exe")) -and -not ($env:PATH -split ';' | Where-Object { $_ -eq $knownNsisPath })) {
@@ -31,13 +33,22 @@ if ((Test-Path (Join-Path $knownNsisPath "makensis.exe")) -and -not ($env:PATH -
 
 if (-not $SkipBuild) {
     $bundleRoot = Join-Path $rootDir "src-tauri\\target\\release\\bundle"
+    $targetBundleRoot = Join-Path $rootDir "src-tauri\\target\\$Target\\release\\bundle"
 
     if (Test-Path $bundleRoot) {
         Remove-Item $bundleRoot -Recurse -Force
     }
 
+    if (Test-Path $targetBundleRoot) {
+        Remove-Item $targetBundleRoot -Recurse -Force
+    }
+
     if (Test-Path $exePath) {
         Remove-Item $exePath -Force
+    }
+
+    if (Test-Path $targetExePath) {
+        Remove-Item $targetExePath -Force
     }
 
     $privateKey = $env:TAURI_SIGNING_PRIVATE_KEY
@@ -70,20 +81,14 @@ if (-not $SkipBuild) {
 
     Push-Location $rootDir
     try {
-        npm run tauri -- build -- --target x86_64-pc-windows-msvc
+        npm run tauri -- build --no-sign --bundles nsis --target $Target
+        if ($LASTEXITCODE -ne 0) {
+            throw "El build manual fallo con codigo $LASTEXITCODE."
+        }
     }
     finally {
         Pop-Location
     }
-}
-
-$exeVersion = $null
-if (Test-Path $exePath) {
-    $exeVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath).ProductVersion
-}
-
-if ($exeVersion -ne $Version) {
-    throw "El binario compilado tiene version '$exeVersion' y no coincide con '$Version'. No subas este release."
 }
 
 $bundlePath = Join-Path $rootDir $BundleDir
@@ -99,9 +104,32 @@ if (-not $setup) {
     throw "No se encontro un instalador NSIS en $bundlePath"
 }
 
+$setupVersionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($setup.FullName)
+$setupVersion = $setupVersionInfo.ProductVersion
+if ([string]::IsNullOrWhiteSpace($setupVersion)) {
+    $setupVersion = $setupVersionInfo.FileVersion
+}
+
+if ($setupVersion -ne $Version) {
+    throw "El instalador generado tiene version '$setupVersion' y no coincide con '$Version'. No subas este release."
+}
+
 $signatureSource = "$($setup.FullName).sig"
 if (-not (Test-Path $signatureSource)) {
-    throw "No se encontro la firma del instalador: $signatureSource"
+    Push-Location $rootDir
+    try {
+        npm run tauri -- signer sign -- "$($setup.FullName)"
+        if ($LASTEXITCODE -ne 0) {
+            throw "La firma manual del instalador fallo con codigo $LASTEXITCODE."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+if (-not (Test-Path $signatureSource)) {
+    throw "No se encontro ni se pudo generar la firma del instalador: $signatureSource"
 }
 
 if (-not $OutDir) {
