@@ -38,12 +38,15 @@ jobs:
           & "C:\Program Files (x86)\NSIS\makensis.exe" /VERSION
 
       - name: Build Tauri release
+        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAVARI_UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
           TAVARI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
-        run: npm run tauri -- build -- --target x86_64-pc-windows-msvc
+        run: |
+          Remove-Item Env:CI -ErrorAction SilentlyContinue
+          npm run tauri -- build -- --target x86_64-pc-windows-msvc
 
       - name: Publish GitHub release assets
         shell: pwsh
