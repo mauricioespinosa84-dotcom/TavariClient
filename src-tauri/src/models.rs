@@ -1,16 +1,42 @@
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const DEFAULT_BACKEND_PATH: &str = r"C:\Users\mauri\OneDrive\Documents\GitHub\launcher-backend";
 pub const DEFAULT_BACKEND_URL: &str =
     "https://mauricioespinosa84-dotcom.github.io/launcher-backend/";
+pub const DEFAULT_UPDATER_PUBLIC_KEY_VALUE: &str =
+    "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRBQ0MzOTVDMDhEQ0I4OEEKUldTS3VOd0lYRG5NU2s5R1F1b0Q2a0k1ZHA1UERjRVhSM3lmNVdGMG5LNUMzdkhLckR6cUFCT2wK";
 pub const DEFAULT_UPDATER_ENDPOINT: Option<&str> = match option_env!("TAVARI_UPDATER_ENDPOINT") {
     Some(endpoint) => Some(endpoint),
     None => Some(
         "https://github.com/mauricioespinosa84-dotcom/TavariClient/releases/latest/download/latest.json",
     ),
 };
-pub const DEFAULT_UPDATER_PUBLIC_KEY: Option<&str> = option_env!("TAVARI_UPDATER_PUBKEY");
+pub const DEFAULT_UPDATER_PUBLIC_KEY: Option<&str> = match option_env!("TAVARI_UPDATER_PUBKEY") {
+    Some(pubkey) => Some(pubkey),
+    None => Some(DEFAULT_UPDATER_PUBLIC_KEY_VALUE),
+};
+
+pub fn normalize_updater_public_key(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.starts_with("untrusted comment:") {
+        return Some(STANDARD.encode(trimmed.as_bytes()));
+    }
+
+    STANDARD
+        .decode(trimmed)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .map(|decoded| decoded.trim().to_string())
+        .filter(|decoded| decoded.starts_with("untrusted comment:"))
+        .map(|_| trimmed.to_string())
+        .or_else(|| Some(trimmed.to_string()))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +59,7 @@ impl Default for LauncherSettings {
             backend_base_url: DEFAULT_BACKEND_URL.to_string(),
             prefer_local_backend: true,
             updater_endpoint: DEFAULT_UPDATER_ENDPOINT.map(str::to_string),
-            updater_public_key: DEFAULT_UPDATER_PUBLIC_KEY.map(str::to_string),
+            updater_public_key: DEFAULT_UPDATER_PUBLIC_KEY.and_then(normalize_updater_public_key),
             data_directory_name: "TavariClient".to_string(),
             min_memory_mb: 2048,
             max_memory_mb: 4096,

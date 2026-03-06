@@ -1,5 +1,6 @@
 use crate::models::{
-    LauncherAccount, LauncherSettings, DEFAULT_UPDATER_ENDPOINT, DEFAULT_UPDATER_PUBLIC_KEY,
+    normalize_updater_public_key, LauncherAccount, LauncherSettings, DEFAULT_UPDATER_ENDPOINT,
+    DEFAULT_UPDATER_PUBLIC_KEY,
 };
 use serde::Serialize;
 use std::fs;
@@ -61,10 +62,8 @@ pub fn sanitize_settings(mut settings: LauncherSettings) -> LauncherSettings {
     settings.updater_public_key = settings
         .updater_public_key
         .as_deref()
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .map(str::to_string)
-        .or_else(|| DEFAULT_UPDATER_PUBLIC_KEY.map(str::to_string));
+        .and_then(normalize_updater_public_key)
+        .or_else(|| DEFAULT_UPDATER_PUBLIC_KEY.and_then(normalize_updater_public_key));
 
     settings.data_directory_name = settings.data_directory_name.trim().to_string();
     if settings.data_directory_name.is_empty() {
@@ -79,7 +78,7 @@ pub fn sanitize_settings(mut settings: LauncherSettings) -> LauncherSettings {
 pub fn load_settings(app: &AppHandle) -> Result<LauncherSettings, String> {
     let path = settings_path(app)?;
     if !path.exists() {
-        let settings = LauncherSettings::default();
+        let settings = sanitize_settings(LauncherSettings::default());
         write_json(&path, &settings)?;
         return Ok(settings);
     }
