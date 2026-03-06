@@ -1,5 +1,4 @@
-use crate::backend::{load_manifest, resolve_backend, ResolvedBackend};
-use crate::discord_presence;
+﻿use crate::backend::{load_manifest, resolve_backend, ResolvedBackend};
 use crate::models::{
     AccountKind, BackendInstance, BackendManifestEntry, LaunchOutcome, LauncherAccount,
     GameLifecycleEvent, MicrosoftDeviceCodeEvent, StatusEvent, SyncProgressEvent,
@@ -1219,7 +1218,6 @@ async fn finalize_running_game(
     running_game: &RunningGame,
 ) {
     clear_running_game(runtime_state, &running_game.instance_key).await;
-    discord_presence::restore_launcher_presence(app);
 
     if running_game.cleanup_secure_runtime {
         let _ = persist_runtime_profile(app, &running_game.instance_key, &running_game.game_dir);
@@ -1646,7 +1644,6 @@ pub async fn launch_instance(
         false,
         Some(instance_key.clone()),
     )?;
-    discord_presence::set_playing_presence(&app, &instance.name);
 
     tokio::spawn(monitor_running_game(
         app.clone(),
@@ -1693,3 +1690,4 @@ pub async fn close_running_game(
     let mut child = running_game.child.lock().await;
     child.kill().await.map_err(|error| error.to_string())
 }
+
