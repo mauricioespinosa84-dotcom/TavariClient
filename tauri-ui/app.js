@@ -19,10 +19,12 @@ const state = {
   activeNewsIndex: 0,
   gameLifecycleStatus: "idle",
   currentGameInstanceKey: null,
-  backendPollInFlight: false
+  backendPollInFlight: false,
+  lastBackendPollAt: 0
 };
 
-const BACKEND_POLL_INTERVAL_MS = 45000;
+const BACKEND_POLL_INTERVAL_MS = 10000;
+const BACKEND_POLL_DEBOUNCE_MS = 3000;
 
 const els = {
   loginView: document.querySelector("#login-view"),
@@ -718,7 +720,7 @@ const refreshBootstrapSilently = async () => {
   }
 };
 
-const pollBackendChanges = async () => {
+const pollBackendChanges = async ({ force = false } = {}) => {
   if (
     state.backendPollInFlight ||
     state.settingsOpen ||
@@ -727,7 +729,12 @@ const pollBackendChanges = async () => {
     return;
   }
 
+  if (!force && Date.now() - state.lastBackendPollAt < BACKEND_POLL_DEBOUNCE_MS) {
+    return;
+  }
+
   state.backendPollInFlight = true;
+  state.lastBackendPollAt = Date.now();
 
   try {
     await refreshBootstrapSilently();
@@ -885,10 +892,25 @@ applyAdaptiveScale();
 
 window.addEventListener("resize", applyAdaptiveScale);
 window.visualViewport?.addEventListener("resize", applyAdaptiveScale);
+window.addEventListener("focus", () => {
+  void pollBackendChanges({ force: true });
+});
+window.addEventListener("online", () => {
+  void pollBackendChanges({ force: true });
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    void pollBackendChanges({ force: true });
+  }
+});
 
 refreshBootstrap().catch((error) => {
   setErrorStatus(error, "No fue posible cargar el launcher.");
 });
+
+window.setTimeout(() => {
+  void pollBackendChanges({ force: true });
+}, 2500);
 
 window.setInterval(() => {
   void pollBackendChanges();
