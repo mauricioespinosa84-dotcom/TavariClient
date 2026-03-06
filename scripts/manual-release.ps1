@@ -161,7 +161,8 @@ $latestJson = [ordered]@{
     }
 } | ConvertTo-Json -Depth 6
 
-Set-Content -Path $latestPath -Value $latestJson -Encoding utf8
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($latestPath, "$latestJson`n", $utf8NoBom)
 
 Write-Host ""
 Write-Host "Release manual preparado."
