@@ -101,6 +101,8 @@ pub struct BackendLauncherConfig {
     pub online: bool,
     #[serde(default)]
     pub client_id: Option<String>,
+    #[serde(default)]
+    pub discord_client_id: Option<String>,
     #[serde(default, rename = "dataDirectory")]
     pub data_directory: Option<String>,
     #[serde(default)]
@@ -224,6 +226,7 @@ pub struct AppBootstrap {
     pub product_name: String,
     pub app_version: String,
     pub is_debug_build: bool,
+    pub backend_fingerprint: String,
     pub settings: LauncherSettings,
     pub account: Option<LauncherAccount>,
     pub launcher_config: BackendLauncherConfig,

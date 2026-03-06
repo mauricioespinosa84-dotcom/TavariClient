@@ -12,6 +12,7 @@ use lighty_launcher::prelude::{
 };
 use once_cell::sync::Lazy;
 use sha1::{Digest, Sha1};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -834,6 +835,27 @@ fn is_retryable_launch_error(error: &str) -> bool {
         || normalized.contains("temporarily unavailable")
 }
 
+fn append_entry_cache_bust(url: &str, cache_key: &str) -> Result<String, String> {
+    let mut parsed = Url::parse(url).map_err(|error| error.to_string())?;
+    let mut pairs = parsed
+        .query_pairs()
+        .into_owned()
+        .collect::<Vec<_>>();
+
+    pairs.retain(|(key, _)| key != "tavari_hash");
+    pairs.push(("tavari_hash".to_string(), cache_key.to_string()));
+
+    parsed.set_query(None);
+    {
+        let mut query = parsed.query_pairs_mut();
+        for (key, value) in pairs {
+            query.append_pair(&key, &value);
+        }
+    }
+
+    Ok(parsed.to_string())
+}
+
 async fn download_to_path(
     url: &str,
     path: &Path,
@@ -857,6 +879,61 @@ async fn download_to_path(
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     fs::write(path, bytes).map_err(|error| error.to_string())
+}
+
+fn prune_stale_manifest_path(path: &Path, expected_paths: &HashSet<PathBuf>) -> Result<bool, String> {
+    if !path.exists() {
+        return Ok(expected_paths.iter().any(|expected| expected.starts_with(path)));
+    }
+
+    let should_keep = expected_paths.iter().any(|expected| expected.starts_with(path));
+
+    if path.is_file() {
+        if should_keep {
+            return Ok(true);
+        }
+
+        clear_readonly_recursive(path)?;
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+        return Ok(false);
+    }
+
+    for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let _ = prune_stale_manifest_path(&entry.path(), expected_paths)?;
+    }
+
+    if should_keep {
+        return Ok(true);
+    }
+
+    clear_readonly_recursive(path)?;
+    fs::remove_dir_all(path).map_err(|error| error.to_string())?;
+    Ok(false)
+}
+
+fn prune_stale_manifest_targets(
+    game_dir: &Path,
+    manifest: &[BackendManifestEntry],
+    ephemeral_runtime: bool,
+) -> Result<(), String> {
+    let expected_paths = manifest
+        .iter()
+        .map(|entry| target_path_for_entry(game_dir, entry, ephemeral_runtime))
+        .collect::<HashSet<_>>();
+
+    let managed_roots = manifest
+        .iter()
+        .filter_map(|entry| entry.path.split('/').next())
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| game_dir.join(segment))
+        .collect::<HashSet<_>>();
+
+    for root in managed_roots {
+        let _ = prune_stale_manifest_path(&root, &expected_paths)?;
+    }
+
+    Ok(())
 }
 
 async fn sync_instance_files(
@@ -890,6 +967,10 @@ async fn sync_instance_files(
         None
     };
     let secure_token = resolved.secure_auth_token.as_deref();
+
+    if !ephemeral_runtime {
+        prune_stale_manifest_targets(&game_dir, &manifest, false)?;
+    }
 
     for (index, entry) in manifest.iter().enumerate() {
         let target = target_path_for_entry(&game_dir, entry, ephemeral_runtime);
@@ -925,10 +1006,12 @@ async fn sync_instance_files(
             if source.exists() {
                 fs::copy(source, &target).map_err(|error| error.to_string())?;
             } else {
-                download_to_path(&entry.url, &target, secure_token).await?;
+                let download_url = append_entry_cache_bust(&entry.url, &entry.hash)?;
+                download_to_path(&download_url, &target, secure_token).await?;
             }
         } else {
-            download_to_path(&entry.url, &target, secure_token).await?;
+            let download_url = append_entry_cache_bust(&entry.url, &entry.hash)?;
+            download_to_path(&download_url, &target, secure_token).await?;
         }
 
         harden_runtime_file(&target, ephemeral_runtime)?;

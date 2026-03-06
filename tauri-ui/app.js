@@ -11,14 +11,18 @@ const { listen } = tauri.event;
 
 const state = {
   bootstrap: null,
+  bootstrapFingerprint: "",
   selectedInstanceKey: null,
   settingsOpen: false,
   activeSettingsTab: "account",
   accountAvatarRequestId: 0,
   activeNewsIndex: 0,
   gameLifecycleStatus: "idle",
-  currentGameInstanceKey: null
+  currentGameInstanceKey: null,
+  backendPollInFlight: false
 };
+
+const BACKEND_POLL_INTERVAL_MS = 45000;
 
 const els = {
   loginView: document.querySelector("#login-view"),
@@ -682,6 +686,7 @@ const renderInstances = (instances) => {
 
 const renderBootstrap = (bootstrap) => {
   state.bootstrap = bootstrap;
+  state.bootstrapFingerprint = bootstrap?.backendFingerprint || "";
   applyAppMeta(bootstrap);
   renderSettings(bootstrap.settings);
   renderAccount(bootstrap.account);
@@ -698,6 +703,39 @@ const refreshBootstrap = async () => {
   setStatus("Cargando", "Cargando Tavari Client.");
   const bootstrap = await invoke("get_bootstrap");
   renderBootstrap(bootstrap);
+};
+
+const refreshBootstrapSilently = async () => {
+  const bootstrap = await invoke("get_bootstrap");
+  const nextFingerprint = bootstrap?.backendFingerprint || "";
+  const changed =
+    Boolean(state.bootstrap) && Boolean(nextFingerprint) && nextFingerprint !== state.bootstrapFingerprint;
+
+  renderBootstrap(bootstrap);
+
+  if (changed && state.gameLifecycleStatus === "idle") {
+    setStatus("Backend actualizado", "Se detectaron cambios nuevos en el backend.");
+  }
+};
+
+const pollBackendChanges = async () => {
+  if (
+    state.backendPollInFlight ||
+    state.settingsOpen ||
+    state.gameLifecycleStatus !== "idle"
+  ) {
+    return;
+  }
+
+  state.backendPollInFlight = true;
+
+  try {
+    await refreshBootstrapSilently();
+  } catch (_error) {
+    // Polling silencioso: no interrumpe al usuario si GitHub Pages tarda en reflejar cambios.
+  } finally {
+    state.backendPollInFlight = false;
+  }
 };
 
 const readSettingsForm = () => ({
@@ -851,3 +889,7 @@ window.visualViewport?.addEventListener("resize", applyAdaptiveScale);
 refreshBootstrap().catch((error) => {
   setErrorStatus(error, "No fue posible cargar el launcher.");
 });
+
+window.setInterval(() => {
+  void pollBackendChanges();
+}, BACKEND_POLL_INTERVAL_MS);

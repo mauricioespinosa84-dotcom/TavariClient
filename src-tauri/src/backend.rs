@@ -9,6 +9,8 @@ use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -78,6 +80,31 @@ fn unix_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+fn append_cache_bust(url: &str, cache_key: Option<&str>) -> Result<String, String> {
+    let mut parsed = Url::parse(url).map_err(|error| error.to_string())?;
+    let nonce = cache_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| unix_timestamp().to_string());
+
+    let mut pairs = parsed
+        .query_pairs()
+        .into_owned()
+        .collect::<BTreeMap<String, String>>();
+    pairs.insert("tavari_cache".to_string(), nonce);
+    parsed.set_query(None);
+
+    {
+        let mut query = parsed.query_pairs_mut();
+        for (key, value) in pairs {
+            query.append_pair(&key, &value);
+        }
+    }
+
+    Ok(parsed.to_string())
 }
 
 fn join_relative(root: &Path, relative: &str) -> PathBuf {
@@ -332,8 +359,14 @@ pub async fn resolve_backend(
         });
     }
 
-    let config_url = format!("{}launcher/config.json", settings.backend_base_url);
-    let instances_url = format!("{}launcher/instances.json", settings.backend_base_url);
+    let config_url = append_cache_bust(
+        &format!("{}launcher/config.json", settings.backend_base_url),
+        None,
+    )?;
+    let instances_url = append_cache_bust(
+        &format!("{}launcher/instances.json", settings.backend_base_url),
+        None,
+    )?;
 
     let launcher_config = read_json_url::<BackendLauncherConfig>(&config_url, None).await?;
     let instances = read_json_url::<BackendInstances>(&instances_url, None).await?;
@@ -427,7 +460,11 @@ pub async fn load_manifest(
         return read_json_file(&local_root.join("manifest.json"));
     }
 
-    read_json_url::<Vec<BackendManifestEntry>>(&instance.url, None).await
+    let manifest_url = append_cache_bust(
+        &instance.url,
+        resolved.launcher_config.cache_version.as_deref(),
+    )?;
+    read_json_url::<Vec<BackendManifestEntry>>(&manifest_url, None).await
 }
 
 fn normalize_backend_text(value: &str) -> String {
@@ -485,7 +522,10 @@ pub async fn load_news(resolved: &ResolvedBackend) -> Result<Vec<BackendNewsItem
             read_json_file::<Vec<BackendNewsItem>>(&news_path)?
         }
     } else {
-        let news_url = format!("{}launcher/news.json", resolved.base_url);
+        let news_url = append_cache_bust(
+            &format!("{}launcher/news.json", resolved.base_url),
+            resolved.launcher_config.cache_version.as_deref(),
+        )?;
         read_json_url::<Vec<BackendNewsItem>>(&news_url, None)
             .await
             .unwrap_or_default()
@@ -574,6 +614,28 @@ fn backend_summary_for_user(
     "Cliente listo para jugar.".to_string()
 }
 
+fn backend_fingerprint(
+    launcher_config: &BackendLauncherConfig,
+    instances: &[InstanceSummary],
+    news: &[BackendNewsItem],
+    is_staff: bool,
+) -> String {
+    let payload = serde_json::json!({
+        "maintenance": launcher_config.maintenance,
+        "maintenanceMessage": launcher_config.maintenance_message,
+        "online": launcher_config.online,
+        "newsEnabled": launcher_config.news_enabled,
+        "cacheVersion": launcher_config.cache_version,
+        "isStaff": is_staff,
+        "instances": instances,
+        "news": news,
+    });
+
+    let mut hasher = Sha1::new();
+    hasher.update(payload.to_string().as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 pub fn build_instance_summaries(resolved: &ResolvedBackend, is_staff: bool) -> Vec<InstanceSummary> {
     let mut instances = resolved
         .instances
@@ -646,6 +708,7 @@ pub async fn get_bootstrap(app: AppHandle) -> Result<AppBootstrap, String> {
         product_name: app.package_info().name.clone(),
         app_version: app.package_info().version.to_string(),
         is_debug_build: cfg!(debug_assertions),
+        backend_fingerprint: backend_fingerprint(&resolved.launcher_config, &instances, &news, is_staff),
         settings,
         account,
         launcher_config: sanitize_launcher_config_for_ui(resolved.launcher_config, is_staff),
