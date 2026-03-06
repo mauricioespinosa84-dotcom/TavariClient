@@ -1270,18 +1270,49 @@ body.is-app-scaled .app-root {
   display: flex;
   align-items: center;
   gap: 14px;
+  padding: 10px 0;
+}
+
+.settings-credit__avatar {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+}
+
+.settings-credit__image,
+.settings-credit__badge {
+  position: absolute;
+  inset: 0;
+}
+
+.settings-credit__image {
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 18px;
+  border: 1px solid rgba(216, 209, 181, 0.18);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
 }
 
 .settings-credit__badge {
   width: 52px;
   height: 52px;
-  border-radius: 18px;
+  margin: auto;
+  border-radius: 16px;
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, rgba(216, 209, 181, 0.18), rgba(93, 107, 63, 0.28));
   font-family: var(--font-display);
   font-size: 1.1rem;
   font-weight: 800;
+  border: 1px solid rgba(216, 209, 181, 0.12);
+}
+
+.settings-credit__badge--alt {
+  background: linear-gradient(135deg, rgba(57, 86, 132, 0.42), rgba(93, 107, 63, 0.22));
 }
 
 .settings-credit__body {
