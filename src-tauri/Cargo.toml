@@ -1,6 +1,6 @@
 [package]
 name = "tavari-client"
-version = "1.0.11"
+version = "1.0.0"
 edition = "2021"
 description = "Tavari Client launcher shell in Rust and Tauri"
 license = "CCANC"
@@ -31,3 +31,6 @@ codegen-units = 1
 lto = true
 panic = "abort"
 strip = true
+
+[patch.crates-io]
+lighty-launch = { path = "../vendor/lighty-launch-0.8.6" }

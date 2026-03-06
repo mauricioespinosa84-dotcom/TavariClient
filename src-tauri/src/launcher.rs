@@ -25,6 +25,8 @@ static PROJECT_DIRS: Lazy<ProjectDirs> = Lazy::new(|| {
 
 const SECURE_RUNTIME_TTL_SECONDS: u64 = 6 * 60 * 60;
 const OBFUSCATED_NAME_LENGTH: usize = 24;
+const LAUNCH_RETRY_ATTEMPTS: usize = 3;
+const LAUNCH_RETRY_DELAY_MS: u64 = 1800;
 
 fn unix_timestamp() -> String {
     SystemTime::now()
@@ -406,6 +408,17 @@ fn needs_copy(target: &Path, expected_hash: &str) -> Result<bool, String> {
     Ok(!hash_matches(target, expected_hash)?)
 }
 
+fn is_retryable_launch_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("503 service unavailable")
+        || normalized.contains("http 503")
+        || normalized.contains("status 503")
+        || normalized.contains("connection reset")
+        || normalized.contains("timed out")
+        || normalized.contains("timeout")
+        || normalized.contains("temporarily unavailable")
+}
+
 async fn download_to_path(
     url: &str,
     path: &Path,
@@ -712,9 +725,9 @@ pub async fn launch_instance(
         },
     )?;
     init_downloader_config(DownloaderConfig {
-        max_concurrent_downloads: 64,
-        max_retries: 4,
-        initial_delay_ms: 50,
+        max_concurrent_downloads: 8,
+        max_retries: 8,
+        initial_delay_ms: 250,
     });
 
     let loader = loader_from_instance(&instance)?;
@@ -729,30 +742,68 @@ pub async fn launch_instance(
     .with_custom_game_dir(game_dir.clone())
     .with_custom_java_dir(java_dir);
 
-    emit_status(&app, "Lanzando", "Iniciando Minecraft.")?;
     let profile = launcher_profile(&account);
-    let mut launch = version
-        .launch(&profile, JavaDistribution::Temurin)
-        .with_jvm_options()
-        .set("Xms", format!("{}M", settings.min_memory_mb))
-        .set("Xmx", format!("{}M", settings.max_memory_mb))
-        .done()
-        .with_arguments()
-        .set(KEY_LAUNCHER_NAME, "Tavari Client")
-        .set(KEY_LAUNCHER_VERSION, env!("CARGO_PKG_VERSION"))
-        .set(KEY_GAME_DIRECTORY, game_dir.to_string_lossy().to_string())
-        .set("width", "1600")
-        .set("height", "900");
+    let mut launch_result = Ok(());
 
-    if let Some(ip) = instance.status.ip.as_deref() {
-        launch = launch.set("server", ip);
+    for attempt in 1..=LAUNCH_RETRY_ATTEMPTS {
+        emit_status(
+            &app,
+            if attempt == 1 {
+                "Lanzando".to_string()
+            } else {
+                format!("Reintentando {attempt}/{LAUNCH_RETRY_ATTEMPTS}")
+            },
+            if attempt == 1 {
+                "Iniciando Minecraft.".to_string()
+            } else {
+                "Reintentando el arranque despues de un error temporal del backend.".to_string()
+            },
+        )?;
+
+        let mut launch = version
+            .launch(&profile, JavaDistribution::Temurin)
+            .with_jvm_options()
+            .set("Xms", format!("{}M", settings.min_memory_mb))
+            .set("Xmx", format!("{}M", settings.max_memory_mb))
+            .done()
+            .with_arguments()
+            .set(KEY_LAUNCHER_NAME, "Tavari Client")
+            .set(KEY_LAUNCHER_VERSION, env!("CARGO_PKG_VERSION"))
+            .set(KEY_GAME_DIRECTORY, game_dir.to_string_lossy().to_string())
+            .set("width", "1600")
+            .set("height", "900");
+
+        if let Some(ip) = instance.status.ip.as_deref() {
+            launch = launch.set("server", ip);
+        }
+
+        if let Some(port) = instance.status.port {
+            launch = launch.set("port", port.to_string());
+        }
+
+        match launch.done().run().await.map_err(|error| error.to_string()) {
+            Ok(()) => {
+                launch_result = Ok(());
+                break;
+            }
+            Err(error) if attempt < LAUNCH_RETRY_ATTEMPTS && is_retryable_launch_error(&error) => {
+                emit_status(
+                    &app,
+                    "Backend ocupado",
+                    "GitHub devolvio un error temporal. Reintentando automaticamente.",
+                )?;
+                tokio::time::sleep(Duration::from_millis(
+                    LAUNCH_RETRY_DELAY_MS * attempt as u64,
+                ))
+                .await;
+            }
+            Err(error) => {
+                launch_result = Err(error);
+                break;
+            }
+        }
     }
 
-    if let Some(port) = instance.status.port {
-        launch = launch.set("port", port.to_string());
-    }
-
-    let launch_result = launch.done().run().await.map_err(|error| error.to_string());
     let secure_cleanup_result = if uses_ephemeral_runtime(&resolved, &instance) {
         cleanup_secure_runtime_dir(&app, &game_dir)
     } else {
