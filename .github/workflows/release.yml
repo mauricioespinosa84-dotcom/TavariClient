@@ -47,7 +47,7 @@ jobs:
             Descarga el instalador desde los assets de este release.
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
-          releaseAssetNamePattern: tavari-client_[version]_windows_[arch][setup][ext]
+          assetNamePattern: tavari-client_[version]_windows_[arch][setup][ext]
           args: --target x86_64-pc-windows-msvc
