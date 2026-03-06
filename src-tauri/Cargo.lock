@@ -2053,8 +2053,6 @@ dependencies = [
 [[package]]
 name = "lighty-launch"
 version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bbd45bfd6437d35340f71b15333dfbaddbedae5f4f6fc3c87d6450ca1b89742"
 dependencies = [
  "async-trait",
  "async_zip",
@@ -4454,7 +4452,7 @@ dependencies = [
 
 [[package]]
 name = "tavari-client"
-version = "1.0.11"
+version = "1.0.12"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
