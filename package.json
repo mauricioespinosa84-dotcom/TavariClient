@@ -1,22 +1,23 @@
-{
-  "name": "tavari-client",
-  "productName": "Tavari Client",
-  "version": "1.0.9",
-  "description": "Launcher rapido en Rust y Tauri para Tavari Studios",
-  "author": {
-    "name": "ShoutoGaming",
-    "url": "https://github.com/ShoutoGaming"
-  },
-  "license": "CCANC",
-  "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build",
-    "rust:check": "cargo check --manifest-path src-tauri/Cargo.toml",
-    "rust:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml",
-    "release:version": "node scripts/release-version.mjs"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.5.1"
-  }
+﻿{
+    "name":  "tavari-client",
+    "productName":  "Tavari Client",
+    "version":  "1.0.9",
+    "description":  "Launcher rapido en Rust y Tauri para Tavari Studios",
+    "author":  {
+                   "name":  "ShoutoGaming",
+                   "url":  "https://github.com/ShoutoGaming"
+               },
+    "license":  "CCANC",
+    "scripts":  {
+                    "tauri":  "tauri",
+                    "dev":  "tauri dev",
+                    "build":  "tauri build",
+                    "rust:check":  "cargo check --manifest-path src-tauri/Cargo.toml",
+                    "rust:fmt":  "cargo fmt --manifest-path src-tauri/Cargo.toml",
+                    "release:version":  "node scripts/release-version.mjs",
+                    "release:prepare-manual":  "powershell -ExecutionPolicy Bypass -File scripts/manual-release.ps1"
+                },
+    "devDependencies":  {
+                            "@tauri-apps/cli":  "^2.5.1"
+                        }
 }

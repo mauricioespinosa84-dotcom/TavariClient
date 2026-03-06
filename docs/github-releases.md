@@ -133,3 +133,25 @@ El launcher carga el updater al iniciar y:
 
 Si el usuario ya tenia `settings.json` sin updater configurado, el launcher tambien
 puede tomar por defecto los valores embebidos en el build.
+
+## 8. Flujo manual de emergencia
+
+Si GitHub Actions falla, puedes preparar los assets manualmente:
+
+```powershell
+cd C:\Users\mauri\OneDrive\Documents\LAUNCHERTEST
+npm run release:prepare-manual -- -Version 1.0.9
+```
+
+Eso te crea:
+
+- `tavari-client_1.0.9_windows_x86_64-setup.exe`
+- `tavari-client_1.0.9_windows_x86_64-setup.exe.sig`
+- `latest.json`
+
+Los 3 se suben al GitHub Release.
+
+Que archivo se comparte a usuarios:
+
+- usuarios nuevos: `tavari-client_<version>_windows_x86_64-setup.exe`
+- usuarios que ya tienen el launcher: no necesitan ningun archivo directo, porque el launcher lee `latest.json` y baja el `setup.exe` automaticamente

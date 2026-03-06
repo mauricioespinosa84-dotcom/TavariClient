@@ -341,12 +341,69 @@ fn sha1_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+fn sha1_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+fn supports_text_hash_variants(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|value| value.to_str()),
+        Some(
+            "cfg"
+                | "conf"
+                | "csv"
+                | "ini"
+                | "json"
+                | "lang"
+                | "mcmeta"
+                | "md"
+                | "properties"
+                | "snbt"
+                | "toml"
+                | "txt"
+                | "xml"
+                | "yaml"
+                | "yml"
+        )
+    )
+}
+
+fn text_hash_matches(path: &Path, expected_hash: &str) -> Result<bool, String> {
+    if !supports_text_hash_variants(path) {
+        return Ok(false);
+    }
+
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => return Ok(false),
+    };
+    let lf = text.replace("\r\n", "\n").replace('\r', "\n");
+
+    if sha1_bytes(lf.as_bytes()).eq_ignore_ascii_case(expected_hash) {
+        return Ok(true);
+    }
+
+    let crlf = lf.replace('\n', "\r\n");
+    Ok(sha1_bytes(crlf.as_bytes()).eq_ignore_ascii_case(expected_hash))
+}
+
+fn hash_matches(path: &Path, expected_hash: &str) -> Result<bool, String> {
+    if sha1_file(path)?.eq_ignore_ascii_case(expected_hash) {
+        return Ok(true);
+    }
+
+    text_hash_matches(path, expected_hash)
+}
+
 fn needs_copy(target: &Path, expected_hash: &str) -> Result<bool, String> {
     if !target.exists() {
         return Ok(true);
     }
 
-    Ok(!sha1_file(target)?.eq_ignore_ascii_case(expected_hash))
+    Ok(!hash_matches(target, expected_hash)?)
 }
 
 async fn download_to_path(

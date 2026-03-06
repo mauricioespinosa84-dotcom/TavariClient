@@ -307,7 +307,8 @@ pub async fn resolve_backend(
         return Ok(resolved);
     }
 
-    let can_use_local = settings.prefer_local_backend && backend_local_available(&local_root);
+    let can_use_local =
+        cfg!(debug_assertions) && settings.prefer_local_backend && backend_local_available(&local_root);
 
     if can_use_local {
         let root = local_root.expect("validated local backend root");
@@ -644,6 +645,7 @@ pub async fn get_bootstrap(app: AppHandle) -> Result<AppBootstrap, String> {
     Ok(AppBootstrap {
         product_name: app.package_info().name.clone(),
         app_version: app.package_info().version.to_string(),
+        is_debug_build: cfg!(debug_assertions),
         settings,
         account,
         launcher_config: sanitize_launcher_config_for_ui(resolved.launcher_config, is_staff),

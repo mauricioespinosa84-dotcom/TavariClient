@@ -57,7 +57,7 @@ impl Default for LauncherSettings {
         Self {
             backend_local_path: Some(DEFAULT_BACKEND_PATH.to_string()),
             backend_base_url: DEFAULT_BACKEND_URL.to_string(),
-            prefer_local_backend: true,
+            prefer_local_backend: false,
             updater_endpoint: DEFAULT_UPDATER_ENDPOINT.map(str::to_string),
             updater_public_key: DEFAULT_UPDATER_PUBLIC_KEY.and_then(normalize_updater_public_key),
             data_directory_name: "TavariClient".to_string(),
@@ -223,6 +223,7 @@ pub struct InstanceSummary {
 pub struct AppBootstrap {
     pub product_name: String,
     pub app_version: String,
+    pub is_debug_build: bool,
     pub settings: LauncherSettings,
     pub account: Option<LauncherAccount>,
     pub launcher_config: BackendLauncherConfig,

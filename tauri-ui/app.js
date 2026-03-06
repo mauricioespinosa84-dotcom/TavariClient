@@ -75,8 +75,11 @@ const els = {
   settingsLogoutBtn: document.querySelector("#settings-logout-btn"),
   accountSummary: document.querySelector("#account-summary"),
   backendLocalPath: document.querySelector("#backend-local-path"),
+  backendLocalField: document.querySelector("#backend-local-path")?.closest(".field"),
   backendBaseUrl: document.querySelector("#backend-base-url"),
   preferLocalBackend: document.querySelector("#prefer-local-backend"),
+  preferLocalBackendRow:
+    document.querySelector("#prefer-local-backend")?.closest(".toggle-row"),
   updaterEndpoint: document.querySelector("#updater-endpoint"),
   updaterPublicKey: document.querySelector("#updater-public-key"),
   minMemory: document.querySelector("#min-memory"),
@@ -235,6 +238,7 @@ const newsItems = () => state.bootstrap?.news || [];
 
 const canAccessLauncherSettings = () => Boolean(state.bootstrap?.isStaff);
 const isStaffSession = () => Boolean(state.bootstrap?.isStaff);
+const canUseLocalBackend = () => Boolean(state.bootstrap?.isDebugBuild);
 const safeServerText = (instance) => {
   if (!instance) return "sin servidor";
   return instance.serverLabel || (instance.serverAddress ? "Servidor privado" : "sin servidor");
@@ -344,11 +348,22 @@ const renderAccount = (account) => {
 const renderSettings = (settings) => {
   els.backendLocalPath.value = settings.backendLocalPath || "";
   els.backendBaseUrl.value = settings.backendBaseUrl || "";
-  els.preferLocalBackend.checked = Boolean(settings.preferLocalBackend);
+  els.preferLocalBackend.checked = canUseLocalBackend() && Boolean(settings.preferLocalBackend);
   els.updaterEndpoint.value = settings.updaterEndpoint || "";
   els.updaterPublicKey.value = settings.updaterPublicKey || "";
   els.minMemory.value = String(settings.minMemoryMb || 2048);
   els.maxMemory.value = String(settings.maxMemoryMb || 4096);
+
+  if (els.backendLocalField) {
+    els.backendLocalField.hidden = !canUseLocalBackend();
+  }
+
+  if (els.preferLocalBackendRow) {
+    els.preferLocalBackendRow.hidden = !canUseLocalBackend();
+  }
+
+  els.backendLocalPath.disabled = !canUseLocalBackend();
+  els.preferLocalBackend.disabled = !canUseLocalBackend();
 };
 
 const formatNewsMeta = (item) => {
@@ -526,7 +541,7 @@ const readSettingsForm = () => ({
   ...state.bootstrap.settings,
   backendLocalPath: els.backendLocalPath.value.trim(),
   backendBaseUrl: els.backendBaseUrl.value.trim(),
-  preferLocalBackend: els.preferLocalBackend.checked,
+  preferLocalBackend: canUseLocalBackend() && els.preferLocalBackend.checked,
   updaterEndpoint: els.updaterEndpoint.value.trim(),
   updaterPublicKey: els.updaterPublicKey.value.trim(),
   minMemoryMb: Number(els.minMemory.value || 2048),
