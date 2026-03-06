@@ -4,10 +4,12 @@ use std::collections::HashMap;
 pub const DEFAULT_BACKEND_PATH: &str = r"C:\Users\mauri\OneDrive\Documents\GitHub\launcher-backend";
 pub const DEFAULT_BACKEND_URL: &str =
     "https://mauricioespinosa84-dotcom.github.io/launcher-backend/";
-pub const DEFAULT_UPDATER_ENDPOINT: Option<&str> = option_env!("TAVARI_UPDATER_ENDPOINT")
-    .or(Some(
+pub const DEFAULT_UPDATER_ENDPOINT: Option<&str> = match option_env!("TAVARI_UPDATER_ENDPOINT") {
+    Some(endpoint) => Some(endpoint),
+    None => Some(
         "https://github.com/mauricioespinosa84-dotcom/TavariClient/releases/latest/download/latest.json",
-    ));
+    ),
+};
 pub const DEFAULT_UPDATER_PUBLIC_KEY: Option<&str> = option_env!("TAVARI_UPDATER_PUBKEY");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
