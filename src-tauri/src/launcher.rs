@@ -16,10 +16,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{
+    AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{oneshot, Mutex as AsyncMutex};
+use tokio::time::timeout;
 use uuid::Uuid;
 
 static PROJECT_DIRS: Lazy<ProjectDirs> = Lazy::new(|| {
@@ -33,6 +36,16 @@ const LAUNCH_RETRY_ATTEMPTS: usize = 3;
 const LAUNCH_RETRY_DELAY_MS: u64 = 1800;
 const GAME_LAUNCH_READY_AFTER_SECONDS: u64 = 18;
 const GAME_PROGRESS_TICK_MS: u64 = 450;
+const MICROSOFT_AUTH_WINDOW_LABEL: &str = "microsoft-auth";
+const MICROSOFT_COMPAT_CLIENT_ID: &str = "00000000402b5328";
+const MICROSOFT_LIVE_AUTHORIZE_URL: &str = "https://login.live.com/oauth20_authorize.srf";
+const MICROSOFT_LIVE_TOKEN_URL: &str = "https://login.live.com/oauth20_token.srf";
+const MICROSOFT_LIVE_REDIRECT_URI: &str = "https://login.live.com/oauth20_desktop.srf";
+const MICROSOFT_LOGIN_TIMEOUT_SECONDS: u64 = 300;
+const XBOX_AUTH_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
+const XSTS_AUTH_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
+const MC_AUTH_URL: &str = "https://api.minecraftservices.com/authentication/login_with_xbox";
+const MC_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 const PERSISTED_RUNTIME_PATHS: &[&str] = &[
     ".fabric",
     "config",
@@ -72,6 +85,342 @@ fn unix_timestamp() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+fn resolve_microsoft_client_id(resolved: &ResolvedBackend) -> (String, bool) {
+    let configured = resolved
+        .launcher_config
+        .client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !value.contains('<'))
+        .map(ToOwned::to_owned);
+
+    match configured {
+        Some(client_id) => (client_id, false),
+        None => (MICROSOFT_COMPAT_CLIENT_ID.to_string(), true),
+    }
+}
+
+fn build_microsoft_live_auth_url(client_id: &str) -> Result<Url, String> {
+    let mut authorize_url =
+        Url::parse(MICROSOFT_LIVE_AUTHORIZE_URL).map_err(|error| error.to_string())?;
+    authorize_url
+        .query_pairs_mut()
+        .append_pair("client_id", client_id)
+        .append_pair("response_type", "code")
+        .append_pair("redirect_uri", MICROSOFT_LIVE_REDIRECT_URI)
+        .append_pair("scope", "XboxLive.signin offline_access")
+        .append_pair("prompt", "select_account");
+    Ok(authorize_url)
+}
+
+fn close_microsoft_auth_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(MICROSOFT_AUTH_WINDOW_LABEL) {
+        let _ = window.close();
+    }
+}
+
+fn open_microsoft_auth_window(app: &AppHandle, verification_uri: &str) -> Result<(), String> {
+    let target = Url::parse(verification_uri).map_err(|error| error.to_string())?;
+    let app_handle = app.clone();
+
+    app.run_on_main_thread(move || {
+        close_microsoft_auth_window(&app_handle);
+
+        let builder = WebviewWindowBuilder::new(
+            &app_handle,
+            MICROSOFT_AUTH_WINDOW_LABEL,
+            WebviewUrl::External(target),
+        )
+        .title("Sign in to Minecraft")
+        .inner_size(600.0, 780.0)
+        .resizable(false)
+        .center()
+        .maximizable(false)
+        .minimizable(false)
+        .focused(true);
+
+        if let Ok(window) = builder.build() {
+            let _ = window.set_focus();
+        }
+    })
+    .map_err(|error| error.to_string())
+}
+
+async fn request_microsoft_live_auth_code(
+    app: &AppHandle,
+    client_id: &str,
+) -> Result<String, String> {
+    let auth_url = build_microsoft_live_auth_url(client_id)?;
+    let (sender, receiver) = oneshot::channel::<Result<String, String>>();
+    let sender = Arc::new(std::sync::Mutex::new(Some(sender)));
+    let app_handle = app.clone();
+    let sender_for_build = sender.clone();
+
+    app.run_on_main_thread(move || {
+        close_microsoft_auth_window(&app_handle);
+
+        let sender_for_navigation = sender_for_build.clone();
+        let sender_for_close = sender_for_build.clone();
+        let app_for_navigation = app_handle.clone();
+        let redirect_prefix = MICROSOFT_LIVE_REDIRECT_URI.to_string();
+
+        let builder = WebviewWindowBuilder::new(
+            &app_handle,
+            MICROSOFT_AUTH_WINDOW_LABEL,
+            WebviewUrl::External(auth_url),
+        )
+        .title("Sign in to Minecraft")
+        .inner_size(600.0, 780.0)
+        .resizable(false)
+        .center()
+        .maximizable(false)
+        .minimizable(false)
+        .focused(true)
+        .on_navigation(move |url| {
+            if !url.as_str().starts_with(&redirect_prefix) {
+                return true;
+            }
+
+            let result = {
+                let mut code = None;
+                let mut error = None;
+
+                for (key, value) in url.query_pairs() {
+                    if key == "code" {
+                        code = Some(value.into_owned());
+                        break;
+                    }
+
+                    if key == "error" {
+                        error = Some(value.into_owned());
+                    }
+                }
+
+                if let Some(code) = code {
+                    Ok(code)
+                } else if let Some(error) = error {
+                    Err(format!("Microsoft devolvio el error {error}."))
+                } else {
+                    Err("Microsoft no devolvio un codigo de autorizacion.".to_string())
+                }
+            };
+
+            if let Some(sender) = sender_for_navigation.lock().ok().and_then(|mut guard| guard.take())
+            {
+                let _ = sender.send(result);
+            }
+
+            close_microsoft_auth_window(&app_for_navigation);
+            false
+        });
+
+        match builder.build() {
+            Ok(window) => {
+                let _ = window.set_focus();
+                window.on_window_event(move |event| {
+                    if matches!(event, WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed)
+                    {
+                        if let Some(sender) =
+                            sender_for_close.lock().ok().and_then(|mut guard| guard.take())
+                        {
+                            let _ = sender
+                                .send(Err("Inicio de sesion de Microsoft cancelado.".to_string()));
+                        }
+                    }
+                });
+            }
+            Err(error) => {
+                if let Some(sender) = sender_for_build.lock().ok().and_then(|mut guard| guard.take())
+                {
+                    let _ = sender.send(Err(error.to_string()));
+                }
+            }
+        }
+    })
+    .map_err(|error| error.to_string())?;
+
+    let code = timeout(Duration::from_secs(MICROSOFT_LOGIN_TIMEOUT_SECONDS), receiver)
+        .await
+        .map_err(|_| "Tiempo agotado durante el inicio de sesion con Microsoft.".to_string())?
+        .map_err(|_| "No se recibio respuesta del inicio de sesion de Microsoft.".to_string())??;
+
+    close_microsoft_auth_window(app);
+    Ok(code)
+}
+
+async fn exchange_microsoft_live_code(client_id: &str, code: &str) -> Result<String, String> {
+    let response = reqwest::Client::new()
+        .post(MICROSOFT_LIVE_TOKEN_URL)
+        .form(&[
+            ("client_id", client_id),
+            ("code", code),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", MICROSOFT_LIVE_REDIRECT_URI),
+        ])
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(response.text().await.unwrap_or_else(|_| "Microsoft rechazo el codigo de inicio de sesion.".to_string()));
+    }
+
+    let token: PopupMicrosoftTokenResponse = response
+        .json()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(token.access_token)
+}
+
+async fn request_xbox_token(ms_token: &str) -> Result<PopupXboxTokenResponse, String> {
+    let response = reqwest::Client::new()
+        .post(XBOX_AUTH_URL)
+        .json(&serde_json::json!({
+            "Properties": {
+                "AuthMethod": "RPS",
+                "SiteName": "user.auth.xboxlive.com",
+                "RpsTicket": format!("d={ms_token}")
+            },
+            "RelyingParty": "http://auth.xboxlive.com",
+            "TokenType": "JWT"
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(response.text().await.unwrap_or_else(|_| "Xbox Live rechazo la autenticacion.".to_string()));
+    }
+
+    response.json().await.map_err(|error| error.to_string())
+}
+
+async fn request_xsts_token(xbox_token: &str) -> Result<PopupXboxTokenResponse, String> {
+    let response = reqwest::Client::new()
+        .post(XSTS_AUTH_URL)
+        .json(&serde_json::json!({
+            "Properties": {
+                "SandboxId": "RETAIL",
+                "UserTokens": [xbox_token]
+            },
+            "RelyingParty": "rp://api.minecraftservices.com/",
+            "TokenType": "JWT"
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "XSTS rechazo la autenticacion.".to_string());
+
+        if error_text.contains("2148916233") {
+            return Err("Esta cuenta de Microsoft no tiene Minecraft Java Edition.".to_string());
+        }
+
+        if error_text.contains("2148916238") {
+            return Err("Xbox Live no esta disponible para esta region o cuenta.".to_string());
+        }
+
+        return Err(error_text);
+    }
+
+    response.json().await.map_err(|error| error.to_string())
+}
+
+async fn request_minecraft_token(xsts_token: &str, uhs: &str) -> Result<String, String> {
+    let response = reqwest::Client::new()
+        .post(MC_AUTH_URL)
+        .json(&serde_json::json!({
+            "identityToken": format!("XBL3.0 x={uhs};{xsts_token}")
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(response.text().await.unwrap_or_else(|_| "Minecraft rechazo el token de Xbox.".to_string()));
+    }
+
+    let token: PopupMinecraftTokenResponse = response
+        .json()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(token.access_token)
+}
+
+async fn request_minecraft_profile(mc_token: &str) -> Result<PopupMinecraftProfile, String> {
+    let response = reqwest::Client::new()
+        .get(MC_PROFILE_URL)
+        .bearer_auth(mc_token)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(response.text().await.unwrap_or_else(|_| "Minecraft no devolvio un perfil valido.".to_string()));
+    }
+
+    response.json().await.map_err(|error| error.to_string())
+}
+
+fn format_popup_minecraft_uuid(uuid: &str) -> String {
+    if uuid.len() != 32 {
+        return uuid.to_string();
+    }
+
+    format!(
+        "{}-{}-{}-{}-{}",
+        &uuid[0..8],
+        &uuid[8..12],
+        &uuid[12..16],
+        &uuid[16..20],
+        &uuid[20..32]
+    )
+}
+
+async fn authenticate_microsoft_popup(
+    app: &AppHandle,
+    client_id: &str,
+) -> Result<UserProfile, String> {
+    let code = request_microsoft_live_auth_code(app, client_id).await?;
+    emit_status(app, "Microsoft", "Intercambiando codigo de acceso.")?;
+
+    let ms_token = exchange_microsoft_live_code(client_id, &code).await?;
+    emit_status(app, "Xbox Live", "Validando la cuenta de Microsoft.")?;
+
+    let xbox_token = request_xbox_token(&ms_token).await?;
+    let xsts_token = request_xsts_token(&xbox_token.token).await?;
+
+    let uhs = xsts_token
+        .display_claims
+        .get("xui")
+        .and_then(|xui| xui.get(0))
+        .and_then(|user| user.get("uhs"))
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Microsoft no devolvio el identificador UHS de Xbox.".to_string())?;
+
+    emit_status(app, "Minecraft", "Cargando el perfil premium.")?;
+    let minecraft_token = request_minecraft_token(&xsts_token.token, uhs).await?;
+    let minecraft_profile = request_minecraft_profile(&minecraft_token).await?;
+
+    Ok(UserProfile {
+        id: None,
+        username: minecraft_profile.name,
+        uuid: format_popup_minecraft_uuid(&minecraft_profile.id),
+        access_token: Some(minecraft_token),
+        email: None,
+        email_verified: true,
+        money: None,
+        role: None,
+        banned: false,
+    })
 }
 
 fn emit_status(
@@ -790,13 +1139,19 @@ fn emit_launch_log_progress(app: &AppHandle, instance_key: &str, line: &str) {
     } else if normalized.contains("openal")
         || normalized.contains("sound engine started")
         || normalized.contains("backend library: lwjgl")
+        || normalized.contains("starting up sound engine")
+        || normalized.contains("window initialized")
     {
-        Some((
-            "launching",
-            "Abriendo ventana",
-            "Minecraft esta terminando de abrir la ventana.",
-            0.96,
-        ))
+        let _ = emit_game_lifecycle(
+            app,
+            "running",
+            "Juego abierto",
+            "Juego iniciado correctamente.",
+            Some(1.0),
+            true,
+            Some(instance_key.to_string()),
+        );
+        None
     } else {
         None
     };
@@ -941,7 +1296,7 @@ async fn monitor_running_game(
                     let _ = emit_game_lifecycle(
                         &app,
                         "running",
-                        "Juego iniciado",
+                        "Juego abierto",
                         "Juego iniciado correctamente.",
                         Some(1.0),
                         true,
@@ -1006,34 +1361,35 @@ pub async fn login_offline(app: AppHandle, username: String) -> Result<LauncherA
 #[tauri::command]
 pub async fn login_microsoft(app: AppHandle) -> Result<LauncherAccount, String> {
     let resolved = resolve_backend(&app, None).await?;
-    let client_id = resolved
-        .launcher_config
-        .client_id
-        .clone()
-        .filter(|value| !value.trim().is_empty() && !value.contains('<'))
-        .ok_or_else(|| {
-            "Define client_id en launcher/config.json para login premium.".to_string()
-        })?;
+    let (client_id, using_compatibility_client_id) = resolve_microsoft_client_id(&resolved);
 
-    let app_handle = app.clone();
-    let mut auth = MicrosoftAuth::new(client_id);
-    auth.set_device_code_callback(move |user_code, verification_uri| {
-        let _ = app_handle.emit(
-            "microsoft-device-code",
-            MicrosoftDeviceCodeEvent {
-                message: "Abre la pagina de Microsoft y pega el codigo mostrado.".to_string(),
-                user_code: user_code.to_string(),
-                verification_uri: verification_uri.to_string(),
-            },
-        );
-    });
-    auth.set_poll_interval(Duration::from_secs(3));
+    let profile = if using_compatibility_client_id {
+        emit_status(&app, "Microsoft", "Abriendo ventana de inicio de sesion premium.")?;
+        authenticate_microsoft_popup(&app, &client_id).await?
+    } else {
+        let app_handle = app.clone();
+        let mut auth = MicrosoftAuth::new(client_id);
+        auth.set_device_code_callback(move |user_code, verification_uri| {
+            let _ = open_microsoft_auth_window(&app_handle, verification_uri);
+            let _ = app_handle.emit(
+                "microsoft-device-code",
+                MicrosoftDeviceCodeEvent {
+                    message:
+                        "Se abrio una ventana de Microsoft. Si no aparece, usa el enlace y escribe el codigo."
+                            .to_string(),
+                    user_code: user_code.to_string(),
+                    verification_uri: verification_uri.to_string(),
+                },
+            );
+        });
+        auth.set_poll_interval(Duration::from_secs(3));
 
-    emit_status(&app, "Microsoft", "Esperando autorizacion premium.")?;
-    let profile = auth
-        .authenticate()
-        .await
-        .map_err(|error| error.to_string())?;
+        emit_status(&app, "Microsoft", "Esperando autorizacion premium.")?;
+        let profile = auth.authenticate().await.map_err(|error| error.to_string());
+        close_microsoft_auth_window(&app);
+        profile?
+    };
+
     let account = account_from_profile(profile, AccountKind::Microsoft);
 
     save_account_inner(&app, &account)?;
@@ -1043,6 +1399,30 @@ pub async fn login_microsoft(app: AppHandle) -> Result<LauncherAccount, String> 
         format!("Bienvenido {}", account.username),
     )?;
     Ok(account)
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PopupMicrosoftTokenResponse {
+    access_token: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PopupXboxTokenResponse {
+    #[serde(rename = "Token")]
+    token: String,
+    #[serde(rename = "DisplayClaims")]
+    display_claims: serde_json::Value,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PopupMinecraftTokenResponse {
+    access_token: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PopupMinecraftProfile {
+    id: String,
+    name: String,
 }
 
 #[tauri::command]

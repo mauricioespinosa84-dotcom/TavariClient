@@ -179,7 +179,7 @@ const applyGameLifecycle = (payload) => {
 
   els.playBtn.disabled = isRunning || isLaunching || !selectedInstance();
   els.playBtn.textContent = isRunning
-    ? "Ejecutando"
+    ? "Juego abierto"
     : isLaunching
       ? "Abriendo..."
       : "Play";
@@ -269,8 +269,21 @@ const normalizeErrorMessage = (error, fallback = "Ocurrio un error del cliente."
     return "Inicia sesion antes de continuar.";
   }
 
-  if (lowered.includes("client_id") || lowered.includes("premium")) {
-    return "El acceso premium no esta disponible en este momento.";
+  if (lowered.includes("client_id")) {
+    return "No fue posible preparar el inicio de sesion con Microsoft.";
+  }
+
+  if (
+    lowered.includes("cancelado") ||
+    lowered.includes("minecraft java") ||
+    lowered.includes("xbox live") ||
+    lowered.includes("codigo de autorizacion")
+  ) {
+    return raw || fallback;
+  }
+
+  if (lowered.includes("premium")) {
+    return "No fue posible completar el inicio de sesion premium.";
   }
 
   if (lowered.includes("microsoft")) {
@@ -715,14 +728,14 @@ els.offlineLoginBtn.addEventListener("click", async () => {
   }
 });
 
-els.microsoftLoginBtn.addEventListener("click", async () => {
-  els.deviceBox.classList.add("hidden");
-  setStatus("Microsoft", "Esperando codigo de acceso premium.");
+  els.microsoftLoginBtn.addEventListener("click", async () => {
+    els.deviceBox.classList.add("hidden");
+    setStatus("Microsoft", "Preparando inicio de sesion premium.");
 
-  try {
-    await invoke("login_microsoft");
-    await refreshBootstrap();
-    setView("dashboard");
+    try {
+      await invoke("login_microsoft");
+      await refreshBootstrap();
+      setView("dashboard");
   } catch (error) {
     setErrorStatus(error, "No fue posible iniciar sesion con Microsoft.");
   }
@@ -805,7 +818,10 @@ await listen("microsoft-device-code", (event) => {
   els.deviceMessage.textContent = payload.message;
   els.deviceCode.textContent = payload.userCode;
   els.deviceLink.href = payload.verificationUri;
-  setStatus("Microsoft", "Abre el enlace y escribe el codigo para continuar.");
+  setStatus(
+    "Microsoft",
+    "Se abrio la ventana de Microsoft. Si no aparece, usa el enlace y el codigo."
+  );
 });
 
 await listen("launcher-status", (event) => {
