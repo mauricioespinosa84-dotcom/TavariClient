@@ -2,6 +2,8 @@
   color-scheme: dark;
   --app-scale: 1;
   --app-unscale: 1;
+  --viewport-width: 100vw;
+  --viewport-height: 100vh;
   --bg: #050503;
   --bg-soft: #12110d;
   --text: #fffdf7;
@@ -77,17 +79,19 @@ button:disabled {
 }
 
 .app-root {
-  position: relative;
-  left: 50%;
-  width: calc(100vw * var(--app-unscale));
-  min-height: 100vh;
-  min-height: calc(100vh * var(--app-unscale));
-  transform: translateX(-50%) scale(var(--app-scale));
-  transform-origin: top center;
+  width: var(--viewport-width);
+  height: var(--viewport-height);
+  min-height: var(--viewport-height);
+  margin: 0 auto;
+}
+
+body.is-app-scaled {
+  --viewport-width: calc(100vw * var(--app-unscale));
+  --viewport-height: calc(100vh * var(--app-unscale));
 }
 
 body.is-app-scaled .app-root {
-  will-change: transform;
+  zoom: var(--app-scale);
 }
 
 .view {
@@ -141,7 +145,8 @@ body.is-app-scaled .app-root {
 
 .login-scene {
   position: relative;
-  min-height: 100vh;
+  height: var(--viewport-height);
+  min-height: var(--viewport-height);
   overflow: hidden;
   background:
     radial-gradient(circle at 10% 100%, rgba(93, 107, 63, 0.28), transparent 32%),
@@ -195,7 +200,7 @@ body.is-app-scaled .app-root {
 .login-shell {
   position: relative;
   z-index: 1;
-  min-height: calc(100vh - 42px);
+  min-height: calc(var(--viewport-height) - 42px);
   display: grid;
   place-items: center;
   padding: 32px 20px 92px;
@@ -378,14 +383,16 @@ body.is-app-scaled .app-root {
 }
 
 .launcher-scene {
-  min-height: 100vh;
+  height: var(--viewport-height);
+  min-height: var(--viewport-height);
   background: #080805;
 }
 
 .launcher-window {
-  min-height: 100vh;
+  height: var(--viewport-height);
+  min-height: var(--viewport-height);
   display: grid;
-  grid-template-rows: 42px 1fr;
+  grid-template-rows: 42px minmax(0, 1fr);
 }
 
 .window-topbar__actions {
@@ -409,7 +416,9 @@ body.is-app-scaled .app-root {
 .launcher-layout {
   display: grid;
   grid-template-columns: 88px 1fr;
-  min-height: calc(100vh - 42px);
+  height: calc(var(--viewport-height) - 42px);
+  min-height: calc(var(--viewport-height) - 42px);
+  align-items: stretch;
 }
 
 .instance-rail {
@@ -419,7 +428,8 @@ body.is-app-scaled .app-root {
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  padding: 18px 12px 14px;
+  height: 100%;
+  padding: 18px 12px 6px;
   background: linear-gradient(180deg, rgba(8, 8, 6, 0.96), rgba(15, 14, 10, 0.9));
   border-right: 1px solid rgba(216, 209, 181, 0.08);
 }
@@ -602,6 +612,8 @@ body.is-app-scaled .app-root {
 
 .hero-stage {
   position: relative;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   isolation: isolate;
 }
@@ -632,8 +644,9 @@ body.is-app-scaled .app-root {
 .hero-content {
   position: relative;
   z-index: 1;
-  min-height: calc(100vh - 42px);
-  padding: 26px 32px 34px 30px;
+  height: 100%;
+  min-height: calc(var(--viewport-height) - 42px);
+  padding: 26px 32px 8px 30px;
   display: flex;
   flex-direction: column;
   transition:
@@ -1494,7 +1507,7 @@ body.is-app-scaled .app-root {
   }
 
   .login-shell {
-    min-height: calc(100vh - 38px);
+    min-height: calc(var(--viewport-height) - 38px);
     padding: 20px 18px 68px;
   }
 
@@ -1517,16 +1530,18 @@ body.is-app-scaled .app-root {
   }
 
   .launcher-window {
-    grid-template-rows: 38px 1fr;
+    height: var(--viewport-height);
+    grid-template-rows: 38px minmax(0, 1fr);
   }
 
   .launcher-layout {
-    min-height: calc(100vh - 38px);
+    height: calc(var(--viewport-height) - 38px);
+    min-height: calc(var(--viewport-height) - 38px);
   }
 
   .instance-rail {
     gap: 10px;
-    padding: 12px 10px;
+    padding: 12px 10px 4px;
   }
 
   .rail-mark,
@@ -1543,8 +1558,9 @@ body.is-app-scaled .app-root {
   }
 
   .hero-content {
-    min-height: calc(100vh - 38px);
-    padding: 16px 18px 18px 18px;
+    height: 100%;
+    min-height: calc(var(--viewport-height) - 38px);
+    padding: 16px 18px 6px 18px;
   }
 
   .hero-head {
