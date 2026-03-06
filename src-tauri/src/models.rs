@@ -274,3 +274,14 @@ pub struct LaunchOutcome {
     pub game_dir: String,
     pub message: String,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameLifecycleEvent {
+    pub status: String,
+    pub stage: String,
+    pub detail: String,
+    pub progress: Option<f64>,
+    pub can_close: bool,
+    pub instance_key: Option<String>,
+}

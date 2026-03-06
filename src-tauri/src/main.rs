@@ -12,6 +12,7 @@ mod storage;
 fn main() {
     tauri::Builder::default()
         .manage(startup::StartupState::default())
+        .manage(launcher::GameRuntimeState::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             backend::get_bootstrap,
@@ -20,6 +21,7 @@ fn main() {
             launcher::login_offline,
             launcher::login_microsoft,
             launcher::launch_instance,
+            launcher::close_running_game,
             startup::startup_ready
         ])
         .run(tauri::generate_context!())

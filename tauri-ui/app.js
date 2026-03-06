@@ -15,7 +15,9 @@ const state = {
   settingsOpen: false,
   activeSettingsTab: "account",
   accountAvatarRequestId: 0,
-  activeNewsIndex: 0
+  activeNewsIndex: 0,
+  gameLifecycleStatus: "idle",
+  currentGameInstanceKey: null
 };
 
 const els = {
@@ -27,6 +29,9 @@ const els = {
   loginStatusDetail: document.querySelector("#login-status-detail"),
   statusTitle: document.querySelector("#status-title"),
   statusDetail: document.querySelector("#status-detail"),
+  statusProgress: document.querySelector("#status-progress"),
+  statusProgressFill: document.querySelector("#status-progress-fill"),
+  statusProgressValue: document.querySelector("#status-progress-value"),
   offlineUsername: document.querySelector("#offline-username"),
   offlineLoginBtn: document.querySelector("#offline-login-btn"),
   microsoftLoginBtn: document.querySelector("#microsoft-login-btn"),
@@ -44,6 +49,7 @@ const els = {
   heroStage: document.querySelector("#hero-stage"),
   heroImage: document.querySelector("#hero-image"),
   playBtn: document.querySelector("#play-btn"),
+  closeGameBtn: document.querySelector("#close-game-btn"),
   logoutBtn: document.querySelector("#logout-btn"),
   newsPanel: document.querySelector("#news-panel"),
   newsCount: document.querySelector("#news-count"),
@@ -95,11 +101,151 @@ const els = {
   settingsInfoInstance: document.querySelector("#settings-info-instance")
 };
 
+const applyAdaptiveScale = () => {
+  const width = window.innerWidth || 0;
+  const height = window.innerHeight || 0;
+  const dpiScale = window.devicePixelRatio || 1;
+
+  let scale = 1;
+
+  if (width > 980) {
+    const widthScale = width / 1240;
+    const heightScale = height / 800;
+    scale = Math.min(1, widthScale, heightScale);
+
+    if (dpiScale >= 1.5) {
+      scale = Math.min(scale, 0.94);
+    } else if (dpiScale >= 1.25) {
+      scale = Math.min(scale, 0.97);
+    }
+
+    scale = Math.max(scale, 0.82);
+  }
+
+  document.documentElement.style.setProperty("--app-scale", scale.toFixed(4));
+  document.documentElement.style.setProperty(
+    "--app-unscale",
+    (1 / scale).toFixed(4)
+  );
+  document.body.classList.toggle("is-app-scaled", scale < 0.999);
+};
+
 const setStatus = (title, detail) => {
   els.loginStatusTitle.textContent = title;
   els.loginStatusDetail.textContent = detail;
   els.statusTitle.textContent = title;
   els.statusDetail.textContent = detail;
+};
+
+const clampProgress = (value) => {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return 0;
+  return Math.max(0, Math.min(1, numeric));
+};
+
+const setStatusProgress = (progress, visible) => {
+  const safeProgress = clampProgress(progress);
+  els.statusProgress.classList.toggle("is-hidden", !visible);
+  els.statusProgress.setAttribute("aria-hidden", String(!visible));
+  els.statusProgressFill.style.width = `${safeProgress * 100}%`;
+  els.statusProgressValue.textContent = `${Math.round(safeProgress * 100)}%`;
+};
+
+const resetGameLifecycle = () => {
+  state.gameLifecycleStatus = "idle";
+  state.currentGameInstanceKey = null;
+  els.playBtn.disabled = !selectedInstance();
+  els.playBtn.textContent = "Play";
+  els.closeGameBtn.classList.add("is-hidden");
+  els.closeGameBtn.disabled = true;
+  setStatusProgress(0, false);
+};
+
+const applyGameLifecycle = (payload) => {
+  if (payload.instanceKey && state.selectedInstanceKey && payload.instanceKey !== state.selectedInstanceKey) {
+    state.selectedInstanceKey = payload.instanceKey;
+    renderInstances(state.bootstrap?.instances || []);
+  }
+
+  state.gameLifecycleStatus = payload.status || "idle";
+  state.currentGameInstanceKey = payload.instanceKey || state.currentGameInstanceKey;
+
+  setStatus(payload.stage || "Lanzando", payload.detail || "Preparando cliente.");
+  setStatusProgress(payload.progress ?? 0, payload.progress != null);
+
+  const isRunning = payload.status === "running";
+  const isLaunching = payload.status === "launching" || payload.status === "closing";
+  const canClose = Boolean(payload.canClose) && (isRunning || isLaunching);
+
+  els.playBtn.disabled = isRunning || isLaunching || !selectedInstance();
+  els.playBtn.textContent = isRunning
+    ? "Ejecutando"
+    : isLaunching
+      ? "Abriendo..."
+      : "Play";
+
+  els.closeGameBtn.classList.toggle("is-hidden", !canClose);
+  els.closeGameBtn.disabled = !canClose;
+
+  if (payload.status === "stopped" || payload.status === "error") {
+    state.gameLifecycleStatus = "idle";
+    state.currentGameInstanceKey = null;
+    els.playBtn.disabled = !selectedInstance();
+    els.playBtn.textContent = "Play";
+    els.closeGameBtn.classList.add("is-hidden");
+    els.closeGameBtn.disabled = true;
+  }
+};
+
+const applySyncProgress = (payload) => {
+  const total = Math.max(1, Number(payload.total) || 1);
+  const current = Math.max(0, Math.min(total, Number(payload.current) || 0));
+  const progress = 0.08 + (current / total) * 0.64;
+
+  state.gameLifecycleStatus = "launching";
+  setStatus(
+    `Sincronizando ${current}/${total}`,
+    payload.file || "Procesando archivos del cliente."
+  );
+  setStatusProgress(progress, true);
+  els.playBtn.disabled = true;
+  els.playBtn.textContent = "Abriendo...";
+  els.closeGameBtn.classList.add("is-hidden");
+  els.closeGameBtn.disabled = true;
+};
+
+const applyLauncherStage = (payload) => {
+  setStatus(payload.stage, payload.detail);
+
+  if (state.gameLifecycleStatus === "running" || state.gameLifecycleStatus === "closing") {
+    return;
+  }
+
+  const stage = String(payload.stage || "").toLowerCase();
+  let progress = null;
+
+  if (stage.includes("sincronizando")) {
+    progress = 0.18;
+  } else if (
+    stage.includes("runtime protegido") ||
+    stage.includes("backend local") ||
+    stage.includes("preparando cliente")
+  ) {
+    progress = 0.74;
+  } else if (stage.includes("lanzando")) {
+    progress = 0.82;
+  } else if (stage.includes("reintentando")) {
+    progress = 0.8;
+  } else if (stage.includes("backend ocupado")) {
+    progress = 0.78;
+  }
+
+  if (progress != null) {
+    state.gameLifecycleStatus = "launching";
+    setStatusProgress(progress, true);
+    els.playBtn.disabled = true;
+    els.playBtn.textContent = "Abriendo...";
+  }
 };
 
 const normalizeErrorMessage = (error, fallback = "Ocurrio un error del cliente.") => {
@@ -466,7 +612,10 @@ const applyHero = (instance) => {
   els.heroImage.style.backgroundImage = instance.backgroundUrl
     ? `linear-gradient(180deg, rgba(3, 8, 18, 0.26), rgba(3, 8, 18, 0.2)), url("${instance.backgroundUrl}")`
     : "";
-  els.playBtn.disabled = false;
+  els.playBtn.disabled =
+    state.gameLifecycleStatus === "launching" ||
+    state.gameLifecycleStatus === "running" ||
+    state.gameLifecycleStatus === "closing";
   renderSettingsContext();
 };
 
@@ -528,6 +677,7 @@ const renderBootstrap = (bootstrap) => {
   applyStaffVisibility(bootstrap);
   setActiveSettingsTab(state.activeSettingsTab);
   setView(bootstrap.account ? "dashboard" : "login");
+  resetGameLifecycle();
   setStatus("Listo", bootstrap.backendSummary);
 };
 
@@ -620,14 +770,32 @@ els.settingsNavButtons.forEach((button) => {
 els.playBtn.addEventListener("click", async () => {
   if (!state.selectedInstanceKey) return;
 
+  state.gameLifecycleStatus = "launching";
+  state.currentGameInstanceKey = state.selectedInstanceKey;
   setStatus("Preparando", "Preparando cliente.");
+  setStatusProgress(0.04, true);
+  els.playBtn.disabled = true;
+  els.playBtn.textContent = "Abriendo...";
+  els.closeGameBtn.classList.add("is-hidden");
+  els.closeGameBtn.disabled = true;
+
   try {
-    const result = await invoke("launch_instance", {
+    await invoke("launch_instance", {
       instanceKey: state.selectedInstanceKey
     });
-    setStatus("Juego iniciado", result.message);
   } catch (error) {
+    resetGameLifecycle();
     setErrorStatus(error, "No fue posible iniciar el juego.");
+  }
+});
+
+els.closeGameBtn.addEventListener("click", async () => {
+  els.closeGameBtn.disabled = true;
+  try {
+    await invoke("close_running_game");
+  } catch (error) {
+    els.closeGameBtn.disabled = false;
+    setErrorStatus(error, "No fue posible cerrar el juego.");
   }
 });
 
@@ -641,16 +809,15 @@ await listen("microsoft-device-code", (event) => {
 });
 
 await listen("launcher-status", (event) => {
-  const payload = event.payload;
-  setStatus(payload.stage, payload.detail);
+  applyLauncherStage(event.payload);
 });
 
 await listen("sync-progress", (event) => {
-  const payload = event.payload;
-  setStatus(
-    `Sincronizando ${payload.current}/${payload.total}`,
-    payload.file || "Procesando archivos del cliente."
-  );
+  applySyncProgress(event.payload);
+});
+
+await listen("game-lifecycle", (event) => {
+  applyGameLifecycle(event.payload);
 });
 
 window.addEventListener("keydown", (event) => {
@@ -660,6 +827,10 @@ window.addEventListener("keydown", (event) => {
 });
 
 setActiveSettingsTab(state.activeSettingsTab);
+applyAdaptiveScale();
+
+window.addEventListener("resize", applyAdaptiveScale);
+window.visualViewport?.addEventListener("resize", applyAdaptiveScale);
 
 refreshBootstrap().catch((error) => {
   setErrorStatus(error, "No fue posible cargar el launcher.");

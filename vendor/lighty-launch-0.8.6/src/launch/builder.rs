@@ -10,6 +10,7 @@ use crate::errors::InstallerResult;
 use lighty_loaders::types::{VersionInfo, Loader, LoaderExtensions};
 use crate::arguments::Arguments;
 use crate::installer::Installer;
+use tokio::process::Child;
 
 #[cfg(feature = "events")]
 use lighty_event::EventBus;
@@ -120,6 +121,23 @@ where
     /// ```
     pub async fn run(self) -> InstallerResult<()> {
         crate::launch::execute_launch(
+            self.version,
+            self.profile,
+            self.java_distribution,
+            &self.jvm_overrides,
+            &self.jvm_removals,
+            &self.arg_overrides,
+            &self.arg_removals,
+            &self.raw_args,
+            #[cfg(feature = "events")]
+            self.event_bus,
+        )
+        .await
+    }
+
+    /// Prepare installation and spawn the game process without waiting for it to exit
+    pub async fn spawn(self) -> InstallerResult<Child> {
+        crate::launch::execute_spawn(
             self.version,
             self.profile,
             self.java_distribution,
@@ -277,4 +295,3 @@ where
         parent
     }
 }
-

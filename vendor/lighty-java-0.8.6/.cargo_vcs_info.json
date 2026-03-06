@@ -1,0 +1,7 @@
+{
+  "git": {
+    "sha1": "bd7399508f730933329de568c891ed19bd2395a5",
+    "dirty": true
+  },
+  "path_in_vcs": "crates/java"
+}

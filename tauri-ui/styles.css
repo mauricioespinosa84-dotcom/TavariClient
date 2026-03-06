@@ -1,5 +1,7 @@
 :root {
   color-scheme: dark;
+  --app-scale: 1;
+  --app-unscale: 1;
   --bg: #050503;
   --bg-soft: #12110d;
   --text: #fffdf7;
@@ -26,6 +28,8 @@
 html,
 body {
   margin: 0;
+  width: 100%;
+  height: 100%;
   min-height: 100%;
   background: #000;
   color: var(--text);
@@ -73,7 +77,15 @@ button:disabled {
 }
 
 .app-root {
+  width: calc(100vw * var(--app-unscale));
   min-height: 100vh;
+  min-height: calc(100vh * var(--app-unscale));
+  transform: scale(var(--app-scale));
+  transform-origin: top left;
+}
+
+body.is-app-scaled .app-root {
+  will-change: transform;
 }
 
 .view {
@@ -762,6 +774,69 @@ button:disabled {
   margin: 8px 0 14px;
 }
 
+.hero-status-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.hero-status-progress.is-hidden,
+.status-action-button.is-hidden {
+  display: none;
+}
+
+.hero-status-progress__track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(216, 209, 181, 0.08);
+  border: 1px solid rgba(216, 209, 181, 0.08);
+}
+
+.hero-status-progress__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(93, 107, 63, 0.96), rgba(216, 209, 181, 0.92));
+  box-shadow: 0 0 18px rgba(93, 107, 63, 0.28);
+  transition: width 220ms ease;
+}
+
+.hero-status-progress__value {
+  min-width: 42px;
+  text-align: right;
+  color: rgba(255, 248, 236, 0.9);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.hero-status-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.status-action-button {
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(59, 65, 41, 0.96), rgba(216, 209, 181, 0.18));
+  color: #fbf7eb;
+  border: 1px solid rgba(216, 209, 181, 0.16);
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.status-action-button:hover,
+.status-action-button:focus-visible {
+  border-color: rgba(216, 209, 181, 0.34);
+  background: linear-gradient(135deg, rgba(76, 86, 52, 0.98), rgba(216, 209, 181, 0.24));
+}
+
 .news-panel {
   grid-column: 3;
   justify-self: end;
@@ -1340,6 +1415,234 @@ button:disabled {
 
   .settings-nav__btn--back {
     margin-left: 0;
+  }
+}
+
+@media (max-width: 1180px) {
+  .hero-footer {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .hero-status-card,
+  .news-panel,
+  .play-button {
+    grid-column: 1;
+  }
+
+  .hero-status-card,
+  .news-panel {
+    width: 100%;
+    max-width: none;
+  }
+
+  .news-panel {
+    justify-self: stretch;
+  }
+
+  .play-button {
+    justify-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-height: 860px) {
+  .hero-content {
+    padding: 20px 24px 22px 24px;
+  }
+
+  .hero-main {
+    padding: 12px 0 20px;
+  }
+
+  .hero-kicker {
+    margin-bottom: 10px;
+  }
+
+  .hero-title {
+    font-size: clamp(4.2rem, 10vw, 7.6rem);
+  }
+
+  .hero-copy {
+    margin-top: 12px;
+    font-size: 0.96rem;
+  }
+
+  .hero-status-card,
+  .news-panel {
+    padding: 16px 18px;
+  }
+
+  .play-button {
+    min-width: 280px;
+    padding: 16px 22px;
+    font-size: 1.28rem;
+  }
+
+  .control-panel {
+    padding: 20px;
+  }
+}
+
+@media (max-height: 760px) {
+  .window-topbar,
+  .login-topbar {
+    height: 38px;
+  }
+
+  .login-shell {
+    min-height: calc(100vh - 38px);
+    padding: 20px 18px 68px;
+  }
+
+  .login-copy h1 {
+    font-size: clamp(2.7rem, 6vw, 4.4rem);
+  }
+
+  .login-copy p {
+    font-size: 0.94rem;
+  }
+
+  .login-actions,
+  .device-box {
+    margin-top: 20px;
+  }
+
+  .login-status {
+    bottom: 12px;
+    padding: 12px 16px;
+  }
+
+  .launcher-window {
+    grid-template-rows: 38px 1fr;
+  }
+
+  .launcher-layout {
+    min-height: calc(100vh - 38px);
+  }
+
+  .instance-rail {
+    gap: 10px;
+    padding: 12px 10px;
+  }
+
+  .rail-mark,
+  .rail-account {
+    width: 42px;
+    height: 42px;
+  }
+
+  .rail-utility,
+  .rail-instance,
+  .rail-instance__art {
+    width: 52px;
+    height: 52px;
+  }
+
+  .hero-content {
+    min-height: calc(100vh - 38px);
+    padding: 16px 18px 18px 18px;
+  }
+
+  .hero-head {
+    gap: 10px;
+  }
+
+  .hero-main {
+    padding: 8px 0 16px;
+  }
+
+  .hero-kicker {
+    font-size: 0.96rem;
+    letter-spacing: 0.18em;
+  }
+
+  .hero-title {
+    font-size: clamp(3.4rem, 8vw, 6rem);
+  }
+
+  .hero-copy {
+    font-size: 0.9rem;
+  }
+
+  .hero-status-card,
+  .news-panel {
+    padding: 14px 16px;
+    border-radius: 18px;
+  }
+
+  .hero-status-card p {
+    margin: 6px 0 10px;
+  }
+
+  .news-panel__list {
+    gap: 8px;
+  }
+
+  .news-panel__item {
+    padding: 10px 12px;
+  }
+
+  .play-button {
+    padding: 14px 20px;
+    font-size: 1.16rem;
+    border-radius: 16px;
+  }
+
+  .settings-layer {
+    padding: 10px;
+  }
+
+  .control-panel {
+    width: min(1000px, 100%);
+    padding: 16px;
+    border-radius: 22px;
+  }
+
+  .settings-content {
+    padding-right: 2px;
+  }
+
+  .settings-section-title {
+    font-size: 1.18rem;
+    margin-bottom: 8px;
+  }
+
+  .settings-card {
+    padding: 14px;
+    border-radius: 18px;
+  }
+}
+
+@media (max-height: 680px) {
+  body {
+    overflow: auto;
+  }
+
+  .hero-content {
+    min-height: auto;
+  }
+
+  .hero-title {
+    font-size: clamp(2.8rem, 7vw, 4.8rem);
+  }
+
+  .hero-footer {
+    gap: 12px;
+  }
+
+  .control-panel__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .control-panel__actions {
+    width: 100%;
+  }
+
+  .control-panel__actions .hud-button {
+    flex: 1;
   }
 }
 

@@ -1,0 +1,34 @@
+[package]
+name = "lighty-java"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+description = "Java runtime management for Lighty Launcher"
+
+[dependencies]
+# Workspace crates
+lighty-core = { workspace = true }
+lighty-event = { workspace = true, optional = true }
+
+# Async Runtime
+tokio.workspace = true
+
+# Sérialisation
+serde.workspace = true
+
+# Error Handling
+thiserror.workspace = true
+
+# Logging
+tracing = { workspace = true, optional = true }
+
+# Chemins
+path-absolutize.workspace = true
+
+[features]
+events = ["lighty-event", "lighty-core/events"]

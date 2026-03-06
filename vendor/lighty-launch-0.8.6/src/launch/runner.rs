@@ -15,6 +15,7 @@ use lighty_java::jre_downloader::find_java_binary;
 use lighty_java::runtime::JavaRuntime;
 use crate::arguments::Arguments;
 use std::collections::{HashMap,HashSet};
+use tokio::process::Child;
 
 #[cfg(feature = "events")]
 use lighty_event::EventBus;
@@ -103,6 +104,60 @@ where
 
         // 4. Lancer le jeu
         execute_game(version, version_data, username, uuid, java_path, arg_overrides, arg_removals, jvm_overrides, jvm_removals, raw_args).await
+}
+
+pub(crate) async fn execute_spawn<T>(
+    version: &mut T,
+    profile: &UserProfile,
+    java_distribution: JavaDistribution,
+    jvm_overrides: &std::collections::HashMap<String, String>,
+    jvm_removals: &std::collections::HashSet<String>,
+    arg_overrides: &std::collections::HashMap<String, String>,
+    arg_removals: &std::collections::HashSet<String>,
+    raw_args: &[String],
+    #[cfg(feature = "events")] event_bus: Option<&EventBus>,
+) -> InstallerResult<Child>
+where
+    T: VersionInfo<LoaderType = Loader> + LoaderExtensions + Arguments + Installer,
+{
+        let username = &profile.username;
+        let uuid = &profile.uuid;
+
+        let metadata = prepare_metadata(
+            version,
+            #[cfg(feature = "events")]
+            event_bus,
+        ).await?;
+
+        let version_data = extract_version(&metadata)?;
+
+        let java_path = ensure_java_installed(
+            version,
+            version_data,
+            &java_distribution,
+            #[cfg(feature = "events")]
+            event_bus,
+        ).await?;
+
+        time_it!("Install delay", version.install(
+            version_data,
+            #[cfg(feature = "events")]
+            event_bus,
+        ).await?);
+
+        execute_game_spawn(
+            version,
+            version_data,
+            username,
+            uuid,
+            java_path,
+            arg_overrides,
+            arg_removals,
+            jvm_overrides,
+            jvm_removals,
+            raw_args,
+        )
+        .await
 }
 
 /// Récupère les métadonnées complètes du loader
@@ -274,6 +329,44 @@ where
             Err(InstallerError::DownloadFailed(format!("Launch failed: {}", e)))
         }
     }
+}
+
+async fn execute_game_spawn<T>(
+    builder: &T,
+    version: &Version,
+    username: &str,
+    uuid: &str,
+    java_path: PathBuf,
+    arg_overrides: &HashMap<String, String>,
+    arg_removals: &HashSet<String>,
+    jvm_overrides: &HashMap<String, String>,
+    jvm_removals: &HashSet<String>,
+    raw_args: &[String],
+) -> InstallerResult<Child>
+where
+    T: VersionInfo + Arguments,
+{
+    let arguments = builder.build_arguments(
+        version,
+        username,
+        uuid,
+        arg_overrides,
+        arg_removals,
+        jvm_overrides,
+        jvm_removals,
+        raw_args,
+    );
+
+    let java_runtime = JavaRuntime::new(java_path);
+    lighty_core::trace_info!("[Launch] Spawning game process...");
+
+    java_runtime
+        .execute(arguments, builder.game_dirs())
+        .await
+        .map_err(|e| {
+            lighty_core::trace_error!("[Launch] Failed to spawn game: {}", e);
+            InstallerError::DownloadFailed(format!("Launch failed: {}", e))
+        })
 }
 
 /// Extrait l'objet Version depuis VersionMetaData

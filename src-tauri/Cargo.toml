@@ -1,6 +1,6 @@
 [package]
 name = "tavari-client"
-version = "1.0.12"
+version = "1.0.13"
 edition = "2021"
 description = "Tavari Client launcher shell in Rust and Tauri"
 license = "CCANC"
@@ -23,7 +23,7 @@ serde_json = "1"
 sha1 = "0.10"
 tauri = { version = "2", features = [] }
 tauri-plugin-updater = "2"
-tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 
 [profile.release]
@@ -33,4 +33,5 @@ panic = "abort"
 strip = true
 
 [patch.crates-io]
+lighty-java = { path = "../vendor/lighty-java-0.8.6" }
 lighty-launch = { path = "../vendor/lighty-launch-0.8.6" }

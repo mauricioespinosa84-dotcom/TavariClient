@@ -1,7 +1,7 @@
 use crate::backend::{load_manifest, resolve_backend, ResolvedBackend};
 use crate::models::{
     AccountKind, BackendInstance, BackendManifestEntry, LaunchOutcome, LauncherAccount,
-    MicrosoftDeviceCodeEvent, StatusEvent, SyncProgressEvent,
+    GameLifecycleEvent, MicrosoftDeviceCodeEvent, StatusEvent, SyncProgressEvent,
 };
 use crate::storage::{load_account, load_settings, save_account_inner, save_settings_inner};
 use directories::ProjectDirs;
@@ -14,8 +14,12 @@ use once_cell::sync::Lazy;
 use sha1::{Digest, Sha1};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::Child;
+use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 static PROJECT_DIRS: Lazy<ProjectDirs> = Lazy::new(|| {
@@ -27,6 +31,41 @@ const SECURE_RUNTIME_TTL_SECONDS: u64 = 6 * 60 * 60;
 const OBFUSCATED_NAME_LENGTH: usize = 24;
 const LAUNCH_RETRY_ATTEMPTS: usize = 3;
 const LAUNCH_RETRY_DELAY_MS: u64 = 1800;
+const GAME_LAUNCH_READY_AFTER_SECONDS: u64 = 18;
+const GAME_PROGRESS_TICK_MS: u64 = 450;
+const PERSISTED_RUNTIME_PATHS: &[&str] = &[
+    ".fabric",
+    "config",
+    "options.txt",
+    "optionsof.txt",
+    "optionsshaders.txt",
+    "servers.dat",
+    "servers.dat_old",
+    "saves",
+    "screenshots",
+];
+
+#[derive(Clone)]
+struct RunningGame {
+    instance_key: String,
+    instance_name: String,
+    child: Arc<AsyncMutex<Child>>,
+    game_dir: PathBuf,
+    cleanup_secure_runtime: bool,
+}
+
+#[derive(Clone)]
+pub struct GameRuntimeState {
+    current: Arc<AsyncMutex<Option<RunningGame>>>,
+}
+
+impl Default for GameRuntimeState {
+    fn default() -> Self {
+        Self {
+            current: Arc::new(AsyncMutex::new(None)),
+        }
+    }
+}
 
 fn unix_timestamp() -> String {
     SystemTime::now()
@@ -62,6 +101,33 @@ fn emit_sync_progress(
             current,
             total,
             file: file.into(),
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn clamp_progress(progress: Option<f64>) -> Option<f64> {
+    progress.map(|value| value.clamp(0.0, 1.0))
+}
+
+fn emit_game_lifecycle(
+    app: &AppHandle,
+    status: impl Into<String>,
+    stage: impl Into<String>,
+    detail: impl Into<String>,
+    progress: Option<f64>,
+    can_close: bool,
+    instance_key: Option<String>,
+) -> Result<(), String> {
+    app.emit(
+        "game-lifecycle",
+        GameLifecycleEvent {
+            status: status.into(),
+            stage: stage.into(),
+            detail: detail.into(),
+            progress: clamp_progress(progress),
+            can_close,
+            instance_key,
         },
     )
     .map_err(|error| error.to_string())
@@ -580,6 +646,87 @@ fn migrate_legacy_runtime_data(game_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn replace_with_copy(source: &Path, target: &Path) -> Result<(), String> {
+    if !source.exists() {
+        return Ok(());
+    }
+
+    if source.is_dir() {
+        if target.exists() {
+            clear_readonly_recursive(target)?;
+            if target.is_dir() {
+                fs::remove_dir_all(target).map_err(|error| error.to_string())?;
+            } else {
+                fs::remove_file(target).map_err(|error| error.to_string())?;
+            }
+        }
+
+        fs::create_dir_all(target).map_err(|error| error.to_string())?;
+        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            replace_with_copy(&entry.path(), &target.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    if target.exists() {
+        clear_readonly_recursive(target)?;
+        if target.is_dir() {
+            fs::remove_dir_all(target).map_err(|error| error.to_string())?;
+        } else {
+            fs::remove_file(target).map_err(|error| error.to_string())?;
+        }
+    }
+
+    fs::copy(source, target).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn persistent_profile_dir(app: &AppHandle, instance_key: &str) -> Result<PathBuf, String> {
+    let settings = load_settings(app)?;
+    let mut root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    root.push(settings.data_directory_name);
+    root.push("profiles");
+    root.push(sanitize_instance_key(instance_key));
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    Ok(root)
+}
+
+fn hydrate_persistent_profile(
+    app: &AppHandle,
+    instance_key: &str,
+    game_dir: &Path,
+) -> Result<(), String> {
+    let profile_dir = persistent_profile_dir(app, instance_key)?;
+
+    for relative in PERSISTED_RUNTIME_PATHS {
+        copy_missing_recursive(&profile_dir.join(relative), &game_dir.join(relative))?;
+    }
+
+    Ok(())
+}
+
+fn persist_runtime_profile(
+    app: &AppHandle,
+    instance_key: &str,
+    game_dir: &Path,
+) -> Result<(), String> {
+    let profile_dir = persistent_profile_dir(app, instance_key)?;
+
+    for relative in PERSISTED_RUNTIME_PATHS {
+        replace_with_copy(&game_dir.join(relative), &profile_dir.join(relative))?;
+    }
+
+    Ok(())
+}
+
 fn launcher_profile(account: &LauncherAccount) -> UserProfile {
     UserProfile {
         id: None,
@@ -604,6 +751,237 @@ fn account_from_profile(profile: UserProfile, kind: AccountKind) -> LauncherAcco
         backend_session_token: None,
         backend_session_expires_at: None,
         backend_session_is_staff: None,
+    }
+}
+
+fn emit_launch_log_progress(app: &AppHandle, instance_key: &str, line: &str) {
+    let normalized = line.trim().to_ascii_lowercase();
+
+    let next_state = if normalized.contains("setting user:")
+        || normalized.contains("xsts")
+        || normalized.contains("access token")
+    {
+        Some((
+            "launching",
+            "Autenticando Minecraft",
+            "Aplicando la sesion del jugador.",
+            0.84,
+        ))
+    } else if normalized.contains("loading for game minecraft")
+        || normalized.contains("fabricloader")
+        || normalized.contains("mixin")
+    {
+        Some((
+            "launching",
+            "Cargando mods",
+            "Inicializando mods y librerias del cliente.",
+            0.88,
+        ))
+    } else if normalized.contains("resource")
+        || normalized.contains("reload")
+        || normalized.contains("stitch")
+    {
+        Some((
+            "launching",
+            "Cargando recursos",
+            "Preparando texturas, packs y recursos del juego.",
+            0.92,
+        ))
+    } else if normalized.contains("openal")
+        || normalized.contains("sound engine started")
+        || normalized.contains("backend library: lwjgl")
+    {
+        Some((
+            "launching",
+            "Abriendo ventana",
+            "Minecraft esta terminando de abrir la ventana.",
+            0.96,
+        ))
+    } else {
+        None
+    };
+
+    if let Some((status, stage, detail, progress)) = next_state {
+        let _ = emit_game_lifecycle(
+            app,
+            status,
+            stage,
+            detail,
+            Some(progress),
+            false,
+            Some(instance_key.to_string()),
+        );
+    }
+}
+
+async fn drain_game_output<R>(app: AppHandle, instance_key: String, mut reader: R)
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    let mut buffer = [0_u8; 4096];
+    let mut pending = String::new();
+
+    loop {
+        match reader.read(&mut buffer).await {
+            Ok(0) => break,
+            Ok(read) => {
+                pending.push_str(&String::from_utf8_lossy(&buffer[..read]));
+
+                while let Some(line_break) = pending.find('\n') {
+                    let line = pending[..line_break].trim().to_string();
+                    pending = pending[line_break + 1..].to_string();
+
+                    if !line.is_empty() {
+                        emit_launch_log_progress(&app, &instance_key, &line);
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let last_line = pending.trim();
+    if !last_line.is_empty() {
+        emit_launch_log_progress(&app, &instance_key, last_line);
+    }
+}
+
+async fn clear_running_game(runtime_state: &GameRuntimeState, instance_key: &str) {
+    let mut current = runtime_state.current.lock().await;
+
+    if current
+        .as_ref()
+        .is_some_and(|game| game.instance_key == instance_key)
+    {
+        *current = None;
+    }
+}
+
+async fn finalize_running_game(
+    app: &AppHandle,
+    runtime_state: &GameRuntimeState,
+    running_game: &RunningGame,
+) {
+    clear_running_game(runtime_state, &running_game.instance_key).await;
+
+    if running_game.cleanup_secure_runtime {
+        let _ = persist_runtime_profile(app, &running_game.instance_key, &running_game.game_dir);
+        let _ = cleanup_secure_runtime_dir(app, &running_game.game_dir);
+    }
+}
+
+async fn monitor_running_game(
+    app: AppHandle,
+    runtime_state: GameRuntimeState,
+    running_game: RunningGame,
+) {
+    let launch_started = tokio::time::Instant::now();
+    let ready_after = Duration::from_secs(GAME_LAUNCH_READY_AFTER_SECONDS);
+    let mut announced_running = false;
+
+    loop {
+        tokio::time::sleep(Duration::from_millis(GAME_PROGRESS_TICK_MS)).await;
+
+        let wait_result = {
+            let mut child = running_game.child.lock().await;
+            child.try_wait().map_err(|error| error.to_string())
+        };
+
+        match wait_result {
+            Ok(Some(status)) => {
+                let (event_status, stage, detail, progress) = if status.success() {
+                    if announced_running {
+                        (
+                            "stopped",
+                            "Juego cerrado",
+                            "Minecraft se cerro correctamente.".to_string(),
+                            Some(1.0),
+                        )
+                    } else {
+                        (
+                            "error",
+                            "Arranque interrumpido",
+                            "Minecraft se cerro antes de completar el inicio.".to_string(),
+                            None,
+                        )
+                    }
+                } else {
+                    let exit_code = status.code().unwrap_or(-1);
+                    (
+                        "error",
+                        "Minecraft finalizo con error",
+                        format!(
+                            "{} termino con codigo de salida {exit_code}.",
+                            running_game.instance_name
+                        ),
+                        None,
+                    )
+                };
+
+                let _ = emit_game_lifecycle(
+                    &app,
+                    event_status,
+                    stage,
+                    detail,
+                    progress,
+                    false,
+                    Some(running_game.instance_key.clone()),
+                );
+                finalize_running_game(&app, &runtime_state, &running_game).await;
+                break;
+            }
+            Ok(None) => {
+                if announced_running {
+                    continue;
+                }
+
+                let elapsed = launch_started.elapsed();
+                if elapsed >= ready_after {
+                    announced_running = true;
+                    let _ = emit_game_lifecycle(
+                        &app,
+                        "running",
+                        "Juego iniciado",
+                        "Juego iniciado correctamente.",
+                        Some(1.0),
+                        true,
+                        Some(running_game.instance_key.clone()),
+                    );
+                    continue;
+                }
+
+                let ratio = elapsed.as_secs_f64() / ready_after.as_secs_f64();
+                let progress = 0.82 + (ratio * 0.16);
+                let detail = if elapsed.as_secs() >= 10 {
+                    "Esperando la ventana de Minecraft."
+                } else {
+                    "Inicializando procesos del juego."
+                };
+
+                let _ = emit_game_lifecycle(
+                    &app,
+                    "launching",
+                    "Abriendo juego",
+                    detail,
+                    Some(progress),
+                    false,
+                    Some(running_game.instance_key.clone()),
+                );
+            }
+            Err(error) => {
+                let _ = emit_game_lifecycle(
+                    &app,
+                    "error",
+                    "Error del launcher",
+                    format!("No fue posible seguir el proceso de Minecraft: {error}"),
+                    None,
+                    false,
+                    Some(running_game.instance_key.clone()),
+                );
+                finalize_running_game(&app, &runtime_state, &running_game).await;
+                break;
+            }
+        }
     }
 }
 
@@ -670,8 +1048,13 @@ pub async fn login_microsoft(app: AppHandle) -> Result<LauncherAccount, String> 
 #[tauri::command]
 pub async fn launch_instance(
     app: AppHandle,
+    game_state: State<'_, GameRuntimeState>,
     instance_key: String,
 ) -> Result<LaunchOutcome, String> {
+    if game_state.current.lock().await.is_some() {
+        return Err("Ya hay un juego en ejecucion. Cierralo antes de iniciar otra instancia.".to_string());
+    }
+
     let mut settings = load_settings(&app)?;
     let account_before =
         load_account(&app)?.ok_or_else(|| "Inicia sesion antes de jugar.".to_string())?;
@@ -694,6 +1077,17 @@ pub async fn launch_instance(
         .secure_is_staff
         .unwrap_or_else(|| account_is_staff(&account, &resolved.launcher_config.staff_users));
     validate_staff_access(&instance, &account, &resolved.launcher_config.staff_users)?;
+    let cleanup_secure_runtime = uses_ephemeral_runtime(&resolved, &instance);
+
+    emit_game_lifecycle(
+        &app,
+        "launching",
+        "Preparando",
+        "Preparando cliente.",
+        Some(0.04),
+        false,
+        Some(instance_key.clone()),
+    )?;
 
     emit_status(
         &app,
@@ -706,6 +1100,9 @@ pub async fn launch_instance(
     )?;
     let game_dir = sync_instance_files(&app, &resolved, &instance_key, &instance, is_staff).await?;
     migrate_legacy_runtime_data(&game_dir)?;
+    if cleanup_secure_runtime {
+        hydrate_persistent_profile(&app, &instance_key, &game_dir)?;
+    }
 
     emit_status(
         &app,
@@ -743,7 +1140,7 @@ pub async fn launch_instance(
     .with_custom_java_dir(java_dir);
 
     let profile = launcher_profile(&account);
-    let mut launch_result = Ok(());
+    let mut launch_result = Err("No fue posible iniciar Minecraft.".to_string());
 
     for attempt in 1..=LAUNCH_RETRY_ATTEMPTS {
         emit_status(
@@ -758,6 +1155,23 @@ pub async fn launch_instance(
             } else {
                 "Reintentando el arranque despues de un error temporal del backend.".to_string()
             },
+        )?;
+        emit_game_lifecycle(
+            &app,
+            "launching",
+            if attempt == 1 {
+                "Lanzando"
+            } else {
+                "Reintentando"
+            },
+            if attempt == 1 {
+                "Iniciando Minecraft."
+            } else {
+                "Reintentando el arranque despues de un error temporal del backend."
+            },
+            Some(0.82),
+            false,
+            Some(instance_key.clone()),
         )?;
 
         let mut launch = version
@@ -781,9 +1195,9 @@ pub async fn launch_instance(
             launch = launch.set("port", port.to_string());
         }
 
-        match launch.done().run().await.map_err(|error| error.to_string()) {
-            Ok(()) => {
-                launch_result = Ok(());
+        match launch.done().spawn().await.map_err(|error| error.to_string()) {
+            Ok(child) => {
+                launch_result = Ok(child);
                 break;
             }
             Err(error) if attempt < LAUNCH_RETRY_ATTEMPTS && is_retryable_launch_error(&error) => {
@@ -804,14 +1218,58 @@ pub async fn launch_instance(
         }
     }
 
-    let secure_cleanup_result = if uses_ephemeral_runtime(&resolved, &instance) {
-        cleanup_secure_runtime_dir(&app, &game_dir)
-    } else {
-        Ok(())
+    let mut child = match launch_result {
+        Ok(child) => child,
+        Err(error) => {
+            if cleanup_secure_runtime {
+                let _ = cleanup_secure_runtime_dir(&app, &game_dir);
+            }
+            return Err(error);
+        }
     };
 
-    launch_result?;
-    secure_cleanup_result?;
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(drain_game_output(app.clone(), instance_key.clone(), stdout));
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(drain_game_output(app.clone(), instance_key.clone(), stderr));
+    }
+
+    let running_game = RunningGame {
+        instance_key: instance_key.clone(),
+        instance_name: instance.name.clone(),
+        child: Arc::new(AsyncMutex::new(child)),
+        game_dir: game_dir.clone(),
+        cleanup_secure_runtime,
+    };
+
+    {
+        let mut current = game_state.current.lock().await;
+        if current.is_some() {
+            if cleanup_secure_runtime {
+                let _ = cleanup_secure_runtime_dir(&app, &game_dir);
+            }
+            return Err("Ya hay un juego en ejecucion. Cierralo antes de iniciar otra instancia.".to_string());
+        }
+        *current = Some(running_game.clone());
+    }
+
+    emit_game_lifecycle(
+        &app,
+        "launching",
+        "Lanzando",
+        "Proceso de Minecraft creado. Esperando inicializacion.",
+        Some(0.82),
+        false,
+        Some(instance_key.clone()),
+    )?;
+
+    tokio::spawn(monitor_running_game(
+        app.clone(),
+        game_state.inner().clone(),
+        running_game,
+    ));
 
     settings.last_instance_key = Some(instance_key.clone());
     save_settings_inner(&app, &settings)?;
@@ -823,6 +1281,32 @@ pub async fn launch_instance(
         } else {
             String::new()
         },
-        message: format!("{} iniciado correctamente.", instance.name),
+        message: format!("{} se esta abriendo.", instance.name),
     })
+}
+
+#[tauri::command]
+pub async fn close_running_game(
+    app: AppHandle,
+    game_state: State<'_, GameRuntimeState>,
+) -> Result<(), String> {
+    let running_game = game_state
+        .current
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "No hay un juego en ejecucion.".to_string())?;
+
+    emit_game_lifecycle(
+        &app,
+        "closing",
+        "Cerrando juego",
+        "Solicitando cierre de Minecraft.",
+        Some(1.0),
+        false,
+        Some(running_game.instance_key.clone()),
+    )?;
+
+    let mut child = running_game.child.lock().await;
+    child.kill().await.map_err(|error| error.to_string())
 }

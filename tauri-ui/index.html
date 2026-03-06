@@ -173,8 +173,35 @@
                       Selecciona una instancia para sincronizar y abrir
                       Minecraft.
                     </p>
+                    <div
+                      class="hero-status-progress is-hidden"
+                      id="status-progress"
+                      aria-hidden="true"
+                    >
+                      <div class="hero-status-progress__track">
+                        <span
+                          class="hero-status-progress__fill"
+                          id="status-progress-fill"
+                        ></span>
+                      </div>
+                      <span
+                        class="hero-status-progress__value"
+                        id="status-progress-value"
+                      >
+                        0%
+                      </span>
+                    </div>
                     <div class="hero-status-card__chips">
                       <span class="info-chip" id="server-chip">sin servidor</span>
+                    </div>
+                    <div class="hero-status-card__actions">
+                      <button
+                        class="status-action-button is-hidden"
+                        id="close-game-btn"
+                        type="button"
+                      >
+                        Cerrar juego
+                      </button>
                     </div>
                   </div>
 
