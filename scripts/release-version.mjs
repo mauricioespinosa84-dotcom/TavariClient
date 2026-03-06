@@ -19,9 +19,11 @@ const files = {
   cargoToml: path.join(rootDir, "src-tauri", "Cargo.toml")
 };
 
+const stripBom = (value) => value.replace(/^\uFEFF/, "");
+
 const updateJsonVersion = async (filePath, transform) => {
   const raw = await readFile(filePath, "utf8");
-  const json = JSON.parse(raw);
+  const json = JSON.parse(stripBom(raw));
   transform(json);
   await writeFile(filePath, `${JSON.stringify(json, null, 2)}\n`, "utf8");
 };
