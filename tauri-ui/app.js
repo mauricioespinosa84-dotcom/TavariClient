@@ -1,0 +1,651 @@
+const tauri = window.__TAURI__;
+
+if (!tauri?.core?.invoke) {
+  document.body.innerHTML =
+    "<main style='padding:24px;color:white;font-family:Segoe UI,sans-serif'>No se encontro la API de Tauri. Ejecuta el launcher con <code>npm run dev</code> o <code>tauri dev</code>.</main>";
+  throw new Error("Tauri API unavailable");
+}
+
+const { invoke } = tauri.core;
+const { listen } = tauri.event;
+
+const state = {
+  bootstrap: null,
+  selectedInstanceKey: null,
+  settingsOpen: false,
+  activeSettingsTab: "account",
+  accountAvatarRequestId: 0,
+  activeNewsIndex: 0
+};
+
+const els = {
+  loginView: document.querySelector("#login-view"),
+  dashboardView: document.querySelector("#dashboard-view"),
+  loginBrandText: document.querySelector("#login-brand-text"),
+  windowBrandText: document.querySelector("#window-brand-text"),
+  loginStatusTitle: document.querySelector("#login-status-title"),
+  loginStatusDetail: document.querySelector("#login-status-detail"),
+  statusTitle: document.querySelector("#status-title"),
+  statusDetail: document.querySelector("#status-detail"),
+  offlineUsername: document.querySelector("#offline-username"),
+  offlineLoginBtn: document.querySelector("#offline-login-btn"),
+  microsoftLoginBtn: document.querySelector("#microsoft-login-btn"),
+  deviceBox: document.querySelector("#device-box"),
+  deviceMessage: document.querySelector("#device-message"),
+  deviceCode: document.querySelector("#device-code"),
+  deviceLink: document.querySelector("#device-link"),
+  instancesList: document.querySelector("#instances-list"),
+  instanceTemplate: document.querySelector("#instance-template"),
+  selectedServerLabel: document.querySelector("#selected-server-label"),
+  selectedInstanceTitle: document.querySelector("#selected-instance-title"),
+  selectedLoaderCopy: document.querySelector("#selected-loader-copy"),
+  sourceChip: document.querySelector("#source-chip"),
+  serverChip: document.querySelector("#server-chip"),
+  heroStage: document.querySelector("#hero-stage"),
+  heroImage: document.querySelector("#hero-image"),
+  playBtn: document.querySelector("#play-btn"),
+  logoutBtn: document.querySelector("#logout-btn"),
+  newsPanel: document.querySelector("#news-panel"),
+  newsCount: document.querySelector("#news-count"),
+  newsTitle: document.querySelector("#news-title"),
+  newsMeta: document.querySelector("#news-meta"),
+  newsContent: document.querySelector("#news-content"),
+  newsList: document.querySelector("#news-list"),
+  settingsLayer: document.querySelector("#settings-layer"),
+  settingsBackdrop: document.querySelector("#settings-backdrop"),
+  closeSettingsBtn: document.querySelector("#close-settings-btn"),
+  saveSettingsBtn: document.querySelector("#save-settings-btn"),
+  settingsBackBtn: document.querySelector("#settings-back-btn"),
+  toggleSettingsBtn: document.querySelector("#toggle-settings-btn"),
+  settingsNavButtons: Array.from(document.querySelectorAll("[data-settings-tab]")),
+  settingsPanels: Array.from(document.querySelectorAll("[data-settings-panel]")),
+  launcherSettingsTabButton: document.querySelector('[data-settings-tab="launcher"]'),
+  launcherSettingsPanel: document.querySelector('[data-settings-panel="launcher"]'),
+  controlPanel: document.querySelector("#control-panel"),
+  accountChip: document.querySelector("#account-chip"),
+  accountAvatar: document.querySelector("#account-avatar"),
+  accountAvatarImage: document.querySelector("#account-avatar-image"),
+  accountAvatarFallback: document.querySelector("#account-avatar-fallback"),
+  settingsAccountAvatarImage: document.querySelector("#settings-account-avatar-image"),
+  settingsAccountAvatarFallback: document.querySelector("#settings-account-avatar-fallback"),
+  settingsAccountName: document.querySelector("#settings-account-name"),
+  settingsAccountType: document.querySelector("#settings-account-type"),
+  settingsAccountUuid: document.querySelector("#settings-account-uuid"),
+  settingsAccountNote: document.querySelector("#settings-account-note"),
+  settingsLogoutBtn: document.querySelector("#settings-logout-btn"),
+  accountSummary: document.querySelector("#account-summary"),
+  backendLocalPath: document.querySelector("#backend-local-path"),
+  backendBaseUrl: document.querySelector("#backend-base-url"),
+  preferLocalBackend: document.querySelector("#prefer-local-backend"),
+  updaterEndpoint: document.querySelector("#updater-endpoint"),
+  updaterPublicKey: document.querySelector("#updater-public-key"),
+  minMemory: document.querySelector("#min-memory"),
+  maxMemory: document.querySelector("#max-memory"),
+  settingsSelectedInstance: document.querySelector("#settings-selected-instance"),
+  settingsSelectedLoader: document.querySelector("#settings-selected-loader"),
+  settingsSelectedServer: document.querySelector("#settings-selected-server"),
+  settingsBackendSummary: document.querySelector("#settings-backend-summary"),
+  settingsSourceMode: document.querySelector("#settings-source-mode"),
+  settingsInstanceCount: document.querySelector("#settings-instance-count"),
+  settingsAppVersion: document.querySelector("#settings-app-version"),
+  settingsInfoAccount: document.querySelector("#settings-info-account"),
+  settingsInfoInstance: document.querySelector("#settings-info-instance")
+};
+
+const setStatus = (title, detail) => {
+  els.loginStatusTitle.textContent = title;
+  els.loginStatusDetail.textContent = detail;
+  els.statusTitle.textContent = title;
+  els.statusDetail.textContent = detail;
+};
+
+const normalizeErrorMessage = (error, fallback = "Ocurrio un error del cliente.") => {
+  const raw = String(error || "").trim();
+
+  if (isStaffSession()) {
+    return raw || fallback;
+  }
+
+  const lowered = raw.toLowerCase();
+
+  if (lowered.includes("mantenimiento")) {
+    return raw;
+  }
+
+  if (lowered.includes("staff")) {
+    return raw;
+  }
+
+  if (lowered.includes("inicia sesion")) {
+    return "Inicia sesion antes de continuar.";
+  }
+
+  if (lowered.includes("client_id") || lowered.includes("premium")) {
+    return "El acceso premium no esta disponible en este momento.";
+  }
+
+  if (lowered.includes("microsoft")) {
+    return "No fue posible completar el inicio de sesion con Microsoft.";
+  }
+
+  if (lowered.includes("offline")) {
+    return "No fue posible crear la sesion local.";
+  }
+
+  return fallback;
+};
+
+const setErrorStatus = (error, fallback) => {
+  setStatus("Error", normalizeErrorMessage(error, fallback));
+};
+
+const setView = (view) => {
+  const showDashboard = view === "dashboard";
+  els.loginView.classList.toggle("view--active", !showDashboard);
+  els.dashboardView.classList.toggle("view--active", showDashboard);
+};
+
+const applyAppMeta = (bootstrap) => {
+  const productName = bootstrap?.productName || "Tavari Client";
+  const appVersion = bootstrap?.appVersion || "";
+  const label = appVersion ? `${productName} ${appVersion}` : productName;
+
+  document.title = productName;
+  els.loginBrandText.textContent = label;
+  els.windowBrandText.textContent = label;
+  els.settingsAppVersion.textContent = label;
+};
+
+const humanAccountType = (account) => {
+  if (!account) return "Sin sesion";
+  return account.kind === "microsoft" ? "Premium Microsoft" : "No premium";
+};
+
+const initialsFromText = (value) =>
+  (value || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("") || "?";
+
+const skinPreviewUrl = (account) => {
+  if (!account) return "";
+  const identity =
+    account.kind === "microsoft" && account.uuid ? account.uuid : account.username;
+  return `https://mc-heads.net/avatar/${encodeURIComponent(identity)}/128`;
+};
+
+const renderAccountAvatar = (account) => {
+  const fallback = account ? initialsFromText(account.username) : "?";
+  const requestId = state.accountAvatarRequestId + 1;
+  const avatarTargets = [
+    [els.accountAvatarImage, els.accountAvatarFallback],
+    [els.settingsAccountAvatarImage, els.settingsAccountAvatarFallback]
+  ];
+
+  state.accountAvatarRequestId = requestId;
+
+  avatarTargets.forEach(([image, fallbackNode]) => {
+    fallbackNode.textContent = fallback;
+    image.classList.remove("is-visible");
+    image.removeAttribute("src");
+  });
+
+  els.accountAvatar.dataset.mode = "fallback";
+
+  if (!account) {
+    return;
+  }
+
+  const previewUrl = skinPreviewUrl(account);
+  const preview = new Image();
+
+  preview.onload = () => {
+    if (state.accountAvatarRequestId !== requestId) return;
+
+    avatarTargets.forEach(([image]) => {
+      image.src = previewUrl;
+      image.classList.add("is-visible");
+    });
+
+    els.accountAvatar.dataset.mode = "skin";
+  };
+
+  preview.onerror = () => {
+    if (state.accountAvatarRequestId !== requestId) return;
+
+    avatarTargets.forEach(([image]) => {
+      image.classList.remove("is-visible");
+    });
+
+    els.accountAvatar.dataset.mode = "fallback";
+  };
+
+  preview.src = previewUrl;
+};
+
+const visibleInstances = (instances = []) =>
+  instances.filter((instance) => !instance.hidden);
+
+const selectedInstance = () =>
+  state.bootstrap?.instances?.find((item) => item.key === state.selectedInstanceKey) || null;
+
+const newsItems = () => state.bootstrap?.news || [];
+
+const canAccessLauncherSettings = () => Boolean(state.bootstrap?.isStaff);
+const isStaffSession = () => Boolean(state.bootstrap?.isStaff);
+const safeServerText = (instance) => {
+  if (!instance) return "sin servidor";
+  return instance.serverLabel || (instance.serverAddress ? "Servidor privado" : "sin servidor");
+};
+
+const setActiveSettingsTab = (tab) => {
+  const nextTab =
+    tab === "launcher" && !canAccessLauncherSettings() ? "account" : tab;
+
+  state.activeSettingsTab = nextTab;
+
+  els.settingsNavButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.settingsTab === nextTab);
+  });
+
+  els.settingsPanels.forEach((panel) => {
+    panel.classList.toggle("is-active", panel.dataset.settingsPanel === nextTab);
+  });
+};
+
+const applyStaffVisibility = (bootstrap) => {
+  const canOpenLauncherTab = Boolean(bootstrap?.isStaff);
+
+  if (els.launcherSettingsTabButton) {
+    els.launcherSettingsTabButton.hidden = !canOpenLauncherTab;
+  }
+
+  if (els.launcherSettingsPanel) {
+    els.launcherSettingsPanel.hidden = !canOpenLauncherTab;
+  }
+
+  if (!canOpenLauncherTab && state.activeSettingsTab === "launcher") {
+    state.activeSettingsTab = "account";
+  }
+};
+
+const setSettingsOpen = (open) => {
+  state.settingsOpen = open;
+  els.heroStage.classList.toggle("is-settings-open", open);
+  els.settingsLayer.classList.toggle("is-open", open);
+  els.toggleSettingsBtn.classList.toggle("is-active", open);
+  els.toggleSettingsBtn.setAttribute("aria-expanded", String(open));
+  els.settingsLayer.setAttribute("aria-hidden", String(!open));
+};
+
+const renderSettingsContext = () => {
+  const instance = selectedInstance();
+  const account = state.bootstrap?.account || null;
+
+  els.settingsSelectedInstance.textContent = instance?.name || "-";
+  els.settingsSelectedLoader.textContent = instance
+    ? `${instance.loaderType} ${instance.loaderVersion} / MC ${instance.minecraftVersion}`
+    : "-";
+  els.settingsSelectedServer.textContent = safeServerText(instance);
+  els.settingsBackendSummary.textContent =
+    state.bootstrap?.backendSummary || "Sin datos del backend.";
+  els.settingsSourceMode.textContent = instance?.sourceMode || "sin backend";
+  els.settingsInstanceCount.textContent = String(
+    visibleInstances(state.bootstrap?.instances || []).length
+  );
+  els.settingsInfoAccount.textContent = account ? account.username : "Sin sesion";
+  els.settingsInfoInstance.textContent = instance?.name || "-";
+};
+
+const performLogout = async () => {
+  await invoke("logout");
+  setSettingsOpen(false);
+  await refreshBootstrap();
+  setView("login");
+};
+
+const renderAccount = (account) => {
+  els.accountChip.textContent = account
+    ? `${account.username} - ${humanAccountType(account)}`
+    : "Sin sesion";
+  renderAccountAvatar(account);
+  els.settingsAccountName.textContent = account ? account.username : "Sin sesion";
+  els.settingsAccountType.textContent = account
+    ? humanAccountType(account)
+    : "No autenticado";
+  els.settingsAccountUuid.textContent = `UUID: ${account?.uuid || "-"}`;
+  els.settingsAccountNote.textContent = account
+    ? `Sesion lista para jugar con ${account.username}.`
+    : "Inicia sesion con Microsoft o usa una cuenta no premium para jugar.";
+  els.settingsLogoutBtn.disabled = !account;
+
+  els.accountSummary.innerHTML = "";
+  const rows = account
+    ? [
+        ["Usuario", account.username],
+        ["Tipo", humanAccountType(account)],
+        ["UUID", account.uuid],
+        ["Ultima sesion", account.lastUsedAt || "Ahora"]
+      ]
+    : [["Sesion", "No iniciada"]];
+
+  rows.forEach(([label, value]) => {
+    const row = document.createElement("div");
+    row.className = "meta-row";
+    row.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+    els.accountSummary.appendChild(row);
+  });
+
+  renderSettingsContext();
+};
+
+const renderSettings = (settings) => {
+  els.backendLocalPath.value = settings.backendLocalPath || "";
+  els.backendBaseUrl.value = settings.backendBaseUrl || "";
+  els.preferLocalBackend.checked = Boolean(settings.preferLocalBackend);
+  els.updaterEndpoint.value = settings.updaterEndpoint || "";
+  els.updaterPublicKey.value = settings.updaterPublicKey || "";
+  els.minMemory.value = String(settings.minMemoryMb || 2048);
+  els.maxMemory.value = String(settings.maxMemoryMb || 4096);
+};
+
+const formatNewsMeta = (item) => {
+  const fragments = [];
+
+  if (item.author) {
+    fragments.push(item.author);
+  }
+
+  if (item.publishDate) {
+    const date = new Date(item.publishDate);
+    if (!Number.isNaN(date.getTime())) {
+      fragments.push(
+        date.toLocaleDateString("es-MX", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric"
+        })
+      );
+    }
+  }
+
+  return fragments.join(" • ") || "Backend de Tavari Client";
+};
+
+const renderNews = (items) => {
+  const safeItems = Array.isArray(items) ? items : [];
+
+  if (state.activeNewsIndex >= safeItems.length) {
+    state.activeNewsIndex = 0;
+  }
+
+  const activeItem = safeItems[state.activeNewsIndex] || null;
+  els.newsCount.textContent = String(safeItems.length);
+  els.newsList.innerHTML = "";
+
+  if (!activeItem) {
+    els.newsTitle.textContent = "Sin noticias";
+    els.newsMeta.textContent = "Backend de Tavari Client";
+    els.newsContent.textContent =
+      "Aqui apareceran las noticias publicadas en tu backend.";
+    return;
+  }
+
+  els.newsTitle.textContent = activeItem.title || "Sin titulo";
+  els.newsMeta.textContent = formatNewsMeta(activeItem);
+  els.newsContent.textContent =
+    activeItem.content || "Esta noticia no tiene contenido.";
+
+  safeItems.forEach((item, index) => {
+    const button = document.createElement("button");
+    const title = document.createElement("strong");
+    const meta = document.createElement("span");
+    button.type = "button";
+    button.className = "news-panel__item";
+    button.classList.toggle("is-active", index === state.activeNewsIndex);
+    title.textContent = item.title || "Sin titulo";
+    meta.textContent = formatNewsMeta(item);
+    button.append(title, meta);
+    button.addEventListener("click", () => {
+      state.activeNewsIndex = index;
+      renderNews(newsItems());
+    });
+    els.newsList.appendChild(button);
+  });
+};
+
+const applyHero = (instance) => {
+  const fallbackTitle = "TAVARI";
+
+  if (!instance) {
+    els.selectedServerLabel.textContent = "SERVIDOR TAVARI";
+    els.selectedInstanceTitle.textContent = fallbackTitle;
+    els.selectedLoaderCopy.textContent = "Selecciona una instancia para jugar.";
+    els.sourceChip.textContent = isStaffSession() ? "sin backend" : "Tavari Client";
+    els.serverChip.textContent = "sin servidor";
+    els.heroImage.style.backgroundImage = "";
+    els.playBtn.disabled = true;
+    renderSettingsContext();
+    return;
+  }
+
+  els.selectedServerLabel.textContent =
+    (instance.serverLabel || "SERVIDOR PUBLICO").toUpperCase();
+  els.selectedInstanceTitle.textContent = instance.name.toUpperCase();
+
+  const fragments = [
+    `${instance.loaderType.toUpperCase()} ${instance.loaderVersion}`,
+    `Minecraft ${instance.minecraftVersion}`
+  ];
+
+  if (instance.maintenance) fragments.push("En mantenimiento");
+  if (instance.staffOnly) fragments.push("Solo staff");
+
+  els.selectedLoaderCopy.textContent = fragments.join(" - ");
+  els.sourceChip.textContent = isStaffSession()
+    ? instance.sourceMode
+    : "Tavari Client";
+  els.serverChip.textContent = safeServerText(instance);
+  els.heroImage.style.backgroundImage = instance.backgroundUrl
+    ? `linear-gradient(180deg, rgba(3, 8, 18, 0.26), rgba(3, 8, 18, 0.2)), url("${instance.backgroundUrl}")`
+    : "";
+  els.playBtn.disabled = false;
+  renderSettingsContext();
+};
+
+const renderInstances = (instances) => {
+  els.instancesList.innerHTML = "";
+  const items = visibleInstances(instances);
+
+  if (!items.length) {
+    state.selectedInstanceKey = null;
+    applyHero(null);
+    return;
+  }
+
+  if (!state.selectedInstanceKey || !items.some((item) => item.key === state.selectedInstanceKey)) {
+    state.selectedInstanceKey = items[0].key;
+  }
+
+  items.forEach((instance) => {
+    const node = els.instanceTemplate.content.firstElementChild.cloneNode(true);
+    const art = node.querySelector(".rail-instance__art");
+    const label = node.querySelector(".rail-instance__name");
+    const initials = initialsFromText(instance.name);
+
+    node.title = instance.name;
+    label.textContent = instance.name;
+    node.classList.toggle("is-selected", state.selectedInstanceKey === instance.key);
+
+    if (instance.iconUrl || instance.thumbnailUrl) {
+      art.style.backgroundImage = `url("${instance.iconUrl || instance.thumbnailUrl}")`;
+      art.textContent = "";
+    } else {
+      art.textContent = initials;
+      art.style.display = "grid";
+      art.style.placeItems = "center";
+      art.style.fontFamily = '"Agency FB", "Bahnschrift", sans-serif';
+      art.style.fontSize = "1.1rem";
+      art.style.fontWeight = "800";
+      art.style.letterSpacing = "0.08em";
+    }
+
+    node.addEventListener("click", () => {
+      state.selectedInstanceKey = instance.key;
+      renderInstances(state.bootstrap.instances);
+    });
+
+    els.instancesList.appendChild(node);
+  });
+
+  applyHero(selectedInstance());
+};
+
+const renderBootstrap = (bootstrap) => {
+  state.bootstrap = bootstrap;
+  applyAppMeta(bootstrap);
+  renderSettings(bootstrap.settings);
+  renderAccount(bootstrap.account);
+  renderInstances(bootstrap.instances);
+  renderNews(bootstrap.news);
+  applyStaffVisibility(bootstrap);
+  setActiveSettingsTab(state.activeSettingsTab);
+  setView(bootstrap.account ? "dashboard" : "login");
+  setStatus("Listo", bootstrap.backendSummary);
+};
+
+const refreshBootstrap = async () => {
+  setStatus("Cargando", "Cargando Tavari Client.");
+  const bootstrap = await invoke("get_bootstrap");
+  renderBootstrap(bootstrap);
+};
+
+const readSettingsForm = () => ({
+  ...state.bootstrap.settings,
+  backendLocalPath: els.backendLocalPath.value.trim(),
+  backendBaseUrl: els.backendBaseUrl.value.trim(),
+  preferLocalBackend: els.preferLocalBackend.checked,
+  updaterEndpoint: els.updaterEndpoint.value.trim(),
+  updaterPublicKey: els.updaterPublicKey.value.trim(),
+  minMemoryMb: Number(els.minMemory.value || 2048),
+  maxMemoryMb: Number(els.maxMemory.value || 4096)
+});
+
+els.offlineLoginBtn.addEventListener("click", async () => {
+  const username = els.offlineUsername.value.trim();
+  if (!username) {
+    setStatus("Falta usuario", "Escribe un nombre no premium de 3 a 16 caracteres.");
+    return;
+  }
+
+  setStatus("Autenticando", "Creando perfil offline.");
+  try {
+    await invoke("login_offline", { username });
+    await refreshBootstrap();
+    setView("dashboard");
+  } catch (error) {
+    setErrorStatus(error, "No fue posible iniciar sesion.");
+  }
+});
+
+els.microsoftLoginBtn.addEventListener("click", async () => {
+  els.deviceBox.classList.add("hidden");
+  setStatus("Microsoft", "Esperando codigo de acceso premium.");
+
+  try {
+    await invoke("login_microsoft");
+    await refreshBootstrap();
+    setView("dashboard");
+  } catch (error) {
+    setErrorStatus(error, "No fue posible iniciar sesion con Microsoft.");
+  }
+});
+
+els.logoutBtn.addEventListener("click", performLogout);
+els.settingsLogoutBtn.addEventListener("click", async () => {
+  if (!state.bootstrap?.account) return;
+  await performLogout();
+});
+
+els.saveSettingsBtn.addEventListener("click", async () => {
+  try {
+    const settings = readSettingsForm();
+    await invoke("save_settings", { settings });
+    await refreshBootstrap();
+    setStatus("Ajustes guardados", "La configuracion local fue actualizada.");
+  } catch (error) {
+    setErrorStatus(error, "No fue posible guardar la configuracion.");
+  }
+});
+
+els.toggleSettingsBtn.addEventListener("click", () => {
+  setSettingsOpen(!state.settingsOpen);
+});
+
+els.closeSettingsBtn.addEventListener("click", () => {
+  setSettingsOpen(false);
+});
+
+els.settingsBackdrop.addEventListener("click", () => {
+  setSettingsOpen(false);
+});
+
+els.settingsBackBtn.addEventListener("click", () => {
+  setSettingsOpen(false);
+});
+
+els.settingsNavButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setActiveSettingsTab(button.dataset.settingsTab);
+  });
+});
+
+els.playBtn.addEventListener("click", async () => {
+  if (!state.selectedInstanceKey) return;
+
+  setStatus("Preparando", "Preparando cliente.");
+  try {
+    const result = await invoke("launch_instance", {
+      instanceKey: state.selectedInstanceKey
+    });
+    setStatus("Juego iniciado", result.message);
+  } catch (error) {
+    setErrorStatus(error, "No fue posible iniciar el juego.");
+  }
+});
+
+await listen("microsoft-device-code", (event) => {
+  const payload = event.payload;
+  els.deviceBox.classList.remove("hidden");
+  els.deviceMessage.textContent = payload.message;
+  els.deviceCode.textContent = payload.userCode;
+  els.deviceLink.href = payload.verificationUri;
+  setStatus("Microsoft", "Abre el enlace y escribe el codigo para continuar.");
+});
+
+await listen("launcher-status", (event) => {
+  const payload = event.payload;
+  setStatus(payload.stage, payload.detail);
+});
+
+await listen("sync-progress", (event) => {
+  const payload = event.payload;
+  setStatus(
+    `Sincronizando ${payload.current}/${payload.total}`,
+    payload.file || "Procesando archivos del cliente."
+  );
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.settingsOpen) {
+    setSettingsOpen(false);
+  }
+});
+
+setActiveSettingsTab(state.activeSettingsTab);
+
+refreshBootstrap().catch((error) => {
+  setErrorStatus(error, "No fue posible cargar el launcher.");
+});

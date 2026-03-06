@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tavari Client</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-root">
+      <section class="view view--active login-scene" id="login-view">
+        <div class="login-scene__aura login-scene__aura--left"></div>
+        <div class="login-scene__aura login-scene__aura--right"></div>
+
+        <div class="login-topbar">
+          <div class="login-topbar__brand">
+            <span class="brand-dot"></span>
+            <span id="login-brand-text">Tavari Client</span>
+          </div>
+        </div>
+
+        <div class="login-shell">
+          <div class="login-copy">
+            <span class="eyebrow">TAVARI STUDIOS</span>
+            <h1>
+              Please <span>Log-In</span><br />
+              with your account
+            </h1>
+            <p>
+              Accede con Microsoft para premium o entra en modo offline para
+              pruebas rapidas.
+            </p>
+          </div>
+
+          <div class="login-actions">
+            <button class="microsoft-button" id="microsoft-login-btn">
+              Microsoft Account
+            </button>
+
+            <div class="offline-card">
+              <label class="field">
+                <span>Usuario no premium</span>
+                <input
+                  id="offline-username"
+                  type="text"
+                  maxlength="16"
+                  placeholder="TavariPlayer"
+                />
+              </label>
+              <button class="offline-button" id="offline-login-btn">
+                Entrar sin premium
+              </button>
+            </div>
+          </div>
+
+          <div class="device-box hidden" id="device-box">
+            <span class="eyebrow">MICROSOFT DEVICE CODE</span>
+            <p id="device-message">
+              Abre el enlace y escribe el codigo para continuar.
+            </p>
+            <div class="device-code" id="device-code">--------</div>
+            <a
+              class="ghost-link"
+              id="device-link"
+              href="#"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Abrir pagina de Microsoft
+            </a>
+          </div>
+        </div>
+
+        <div class="login-status">
+          <strong id="login-status-title">Listo</strong>
+          <span id="login-status-detail">Esperando autenticacion.</span>
+        </div>
+      </section>
+
+      <section class="view launcher-scene" id="dashboard-view">
+        <div class="launcher-window">
+          <header class="window-topbar">
+            <div class="window-topbar__brand">
+              <span class="brand-dot"></span>
+              <span id="window-brand-text">Tavari Client</span>
+            </div>
+
+            <div class="window-topbar__actions">
+              <button class="hud-button hud-button--danger" id="logout-btn">
+                Cerrar sesion
+              </button>
+            </div>
+          </header>
+
+          <div class="launcher-layout">
+            <aside class="instance-rail">
+              <div class="rail-mark" aria-label="Tavari Client">
+                <img
+                  class="rail-mark__logo"
+                  src="./assets/tavari-logo.png"
+                  alt="Logo de Tavari Client"
+                />
+              </div>
+              <div class="instance-rail__list" id="instances-list"></div>
+              <div class="rail-footer">
+                <button
+                  class="rail-utility"
+                  id="toggle-settings-btn"
+                  type="button"
+                  aria-label="Configuracion"
+                  aria-controls="control-panel"
+                  aria-expanded="false"
+                  title="Configuracion"
+                >
+                  <svg
+                    class="rail-utility__icon"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M10.6 2h2.8l.48 2.1c.4.12.79.28 1.16.48l1.88-1.05 1.98 1.98-1.05 1.88c.2.37.36.76.48 1.16L22 10.6v2.8l-2.1.48c-.12.4-.28.79-.48 1.16l1.05 1.88-1.98 1.98-1.88-1.05c-.37.2-.76.36-1.16.48L13.4 22h-2.8l-.48-2.1a7.8 7.8 0 0 1-1.16-.48l-1.88 1.05-1.98-1.98 1.05-1.88a7.8 7.8 0 0 1-.48-1.16L2 13.4v-2.8l2.1-.48c.12-.4.28-.79.48-1.16L3.53 7.08 5.51 5.1l1.88 1.05c.37-.2.76-.36 1.16-.48L10.6 2Z"
+                    />
+                    <circle cx="12" cy="12" r="3.2" />
+                  </svg>
+                  <span class="rail-utility__tooltip">Configuracion</span>
+                </button>
+
+                <div class="rail-account" id="account-avatar">
+                  <img
+                    class="rail-account__image"
+                    id="account-avatar-image"
+                    alt="Skin del jugador"
+                  />
+                  <span class="rail-account__fallback" id="account-avatar-fallback">?</span>
+                </div>
+              </div>
+            </aside>
+
+            <section class="hero-stage" id="hero-stage">
+              <div class="hero-image" id="hero-image"></div>
+              <div class="hero-overlay"></div>
+
+              <div class="hero-content">
+                <div class="hero-head">
+                  <div class="hero-branding">
+                    <span class="eyebrow">TAVARI CLIENT</span>
+                    <div class="hero-identity">
+                      <span class="hero-studio">TAVARI</span>
+                      <span class="hero-social">@TavariStudios</span>
+                    </div>
+                  </div>
+
+                  <div class="hero-head__chips">
+                    <span class="info-chip" id="source-chip">backend local</span>
+                    <span class="account-chip" id="account-chip">Sin sesion</span>
+                  </div>
+                </div>
+
+                <div class="hero-main">
+                  <span class="hero-kicker" id="selected-server-label">
+                    SERVIDOR TAVARI
+                  </span>
+                  <h2 class="hero-title" id="selected-instance-title">TAVARI</h2>
+                  <p class="hero-copy" id="selected-loader-copy">
+                    Selecciona una instancia para jugar.
+                  </p>
+                </div>
+
+                <div class="hero-footer">
+                  <div class="hero-status-card">
+                    <strong id="status-title">Listo</strong>
+                    <p id="status-detail">
+                      Selecciona una instancia para sincronizar y abrir
+                      Minecraft.
+                    </p>
+                    <div class="hero-status-card__chips">
+                      <span class="info-chip" id="server-chip">sin servidor</span>
+                    </div>
+                  </div>
+
+                  <button class="play-button" id="play-btn" disabled>Play</button>
+
+                  <aside class="news-panel" id="news-panel">
+                    <div class="news-panel__header">
+                      <div>
+                        <span class="eyebrow">NEWS</span>
+                        <strong>Noticias</strong>
+                      </div>
+                      <span class="news-panel__badge" id="news-count">0</span>
+                    </div>
+
+                    <article class="news-panel__featured" id="news-featured">
+                      <h3 id="news-title">Sin noticias</h3>
+                      <div class="news-panel__meta" id="news-meta">
+                        Backend de Tavari Client
+                      </div>
+                      <p id="news-content">
+                        Aqui apareceran las noticias publicadas en tu backend.
+                      </p>
+                    </article>
+
+                    <div class="news-panel__list" id="news-list"></div>
+                  </aside>
+                </div>
+              </div>
+
+              <div class="settings-layer" id="settings-layer" aria-hidden="true">
+                <button
+                  class="settings-backdrop"
+                  id="settings-backdrop"
+                  type="button"
+                  aria-label="Cerrar ajustes"
+                ></button>
+
+                <aside class="control-panel" id="control-panel">
+                  <div class="control-panel__header">
+                    <div>
+                      <span class="eyebrow">AJUSTES</span>
+                      <h3>Tavari Client</h3>
+                      <p class="control-panel__copy">
+                        Configura cuenta, Java, juego y backend desde un solo
+                        panel.
+                      </p>
+                    </div>
+                    <div class="control-panel__actions">
+                      <button class="hud-button" id="close-settings-btn">
+                        Cerrar
+                      </button>
+                      <button class="hud-button hud-button--primary" id="save-settings-btn">
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="settings-nav" id="settings-nav">
+                    <button
+                      class="settings-nav__btn is-active"
+                      type="button"
+                      data-settings-tab="account"
+                    >
+                      CUENTAS
+                    </button>
+                    <button
+                      class="settings-nav__btn"
+                      type="button"
+                      data-settings-tab="java"
+                    >
+                      JAVA
+                    </button>
+                    <button
+                      class="settings-nav__btn"
+                      type="button"
+                      data-settings-tab="game"
+                    >
+                      JUEGO
+                    </button>
+                    <button
+                      class="settings-nav__btn"
+                      type="button"
+                      data-settings-tab="launcher"
+                    >
+                      LAUNCHER
+                    </button>
+                    <button
+                      class="settings-nav__btn"
+                      type="button"
+                      data-settings-tab="info"
+                    >
+                      INFORMACION
+                    </button>
+                    <button
+                      class="settings-nav__btn settings-nav__btn--back"
+                      id="settings-back-btn"
+                      type="button"
+                    >
+                      VOLVER
+                    </button>
+                  </div>
+
+                  <div class="settings-content">
+                  <section
+                    class="settings-tab is-active"
+                    data-settings-panel="account"
+                  >
+                    <div class="settings-grid">
+                      <div class="settings-column">
+                        <div class="settings-section-title">Cuenta activa</div>
+                        <div class="settings-card settings-card--profile">
+                          <div class="settings-profile">
+                            <div class="settings-profile__avatar">
+                              <img
+                                class="settings-profile__image"
+                                id="settings-account-avatar-image"
+                                alt="Skin del jugador"
+                              />
+                              <span
+                                class="settings-profile__fallback"
+                                id="settings-account-avatar-fallback"
+                              >
+                                ?
+                              </span>
+                            </div>
+                            <div class="settings-profile__body">
+                              <strong id="settings-account-name">Sin sesion</strong>
+                              <span id="settings-account-type">No premium</span>
+                              <span id="settings-account-uuid">UUID: -</span>
+                            </div>
+                          </div>
+
+                          <p class="settings-copy" id="settings-account-note">
+                            Inicia sesion con Microsoft o usa una cuenta no
+                            premium para jugar.
+                          </p>
+
+                          <button
+                            class="settings-secondary"
+                            id="settings-logout-btn"
+                            type="button"
+                          >
+                            Cerrar sesion
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="settings-column">
+                        <div class="settings-section-title">Resumen</div>
+                        <div class="settings-card">
+                          <div class="meta-list" id="account-summary"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="settings-tab" data-settings-panel="java">
+                    <div class="settings-grid">
+                      <div class="settings-column">
+                        <div class="settings-section-title">Configurar RAM</div>
+                        <div class="settings-card">
+                          <p class="settings-copy">
+                            Ajusta la memoria minima y maxima que utilizara el
+                            cliente al iniciar Minecraft.
+                          </p>
+
+                          <div class="settings-inline-fields">
+                            <label class="field">
+                              <span>RAM minima (MB)</span>
+                              <input
+                                id="min-memory"
+                                type="number"
+                                min="1024"
+                                step="256"
+                              />
+                            </label>
+
+                            <label class="field">
+                              <span>RAM maxima (MB)</span>
+                              <input
+                                id="max-memory"
+                                type="number"
+                                min="2048"
+                                step="256"
+                              />
+                            </label>
+                          </div>
+
+                          <div class="settings-pill">
+                            Recomendado: minimo 2048 MB y maximo 4096 MB
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="settings-column">
+                        <div class="settings-section-title">Runtime Java</div>
+                        <div class="settings-card">
+                          <p class="settings-copy">
+                            Tavari Client gestionara automaticamente el runtime
+                            adecuado para cada version del juego.
+                          </p>
+
+                          <div class="settings-highlight-list">
+                            <div class="settings-highlight">
+                              Java 8: Minecraft 1.7 - 1.16.5
+                            </div>
+                            <div class="settings-highlight">
+                              Java 17: Minecraft 1.17 - 1.20.6
+                            </div>
+                            <div class="settings-highlight">
+                              Java 21: Minecraft 1.21+
+                            </div>
+                          </div>
+
+                          <div class="settings-pill settings-pill--muted">
+                            Soporte manual de ruta Java: proxima iteracion
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="settings-tab" data-settings-panel="game">
+                    <div class="settings-grid">
+                      <div class="settings-column">
+                        <div class="settings-section-title">
+                          Instancia seleccionada
+                        </div>
+                        <div class="settings-card">
+                          <div class="meta-list">
+                            <div class="meta-row">
+                              <span>Instancia</span>
+                              <strong id="settings-selected-instance">-</strong>
+                            </div>
+                            <div class="meta-row">
+                              <span>Loader</span>
+                              <strong id="settings-selected-loader">-</strong>
+                            </div>
+                            <div class="meta-row">
+                              <span>Servidor</span>
+                              <strong id="settings-selected-server">-</strong>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="settings-column">
+                        <div class="settings-section-title">Resolucion</div>
+                        <div class="settings-card">
+                          <p class="settings-copy">
+                            La resolucion personalizada llegara en una siguiente
+                            version. Aqui quedara ese ajuste.
+                          </p>
+
+                          <div class="settings-inline-fields">
+                            <label class="field field--disabled">
+                              <span>Ancho</span>
+                              <input
+                                type="number"
+                                placeholder="1280"
+                                disabled
+                              />
+                            </label>
+
+                            <label class="field field--disabled">
+                              <span>Alto</span>
+                              <input
+                                type="number"
+                                placeholder="720"
+                                disabled
+                              />
+                            </label>
+                          </div>
+
+                          <div class="settings-pill settings-pill--muted">
+                            Proximamente
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="settings-tab" data-settings-panel="launcher">
+                    <div class="settings-grid">
+                      <div class="settings-column">
+                        <div class="settings-section-title">Backend</div>
+                        <div class="settings-card">
+                          <label class="field">
+                            <span>Backend local</span>
+                            <input id="backend-local-path" type="text" />
+                          </label>
+
+                          <label class="field">
+                            <span>Backend remoto</span>
+                            <input id="backend-base-url" type="text" />
+                          </label>
+
+                          <label class="toggle-row">
+                            <input id="prefer-local-backend" type="checkbox" />
+                            <span>Preferir backend local</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div class="settings-column">
+                        <div class="settings-section-title">Estado</div>
+                        <div class="settings-card">
+                          <p class="settings-copy" id="settings-backend-summary">
+                            Cargando datos del backend.
+                          </p>
+
+                          <div class="meta-list">
+                            <div class="meta-row">
+                              <span>Origen activo</span>
+                              <strong id="settings-source-mode">-</strong>
+                            </div>
+                            <div class="meta-row">
+                              <span>Instancias</span>
+                              <strong id="settings-instance-count">0</strong>
+                            </div>
+                          </div>
+
+                          <div class="settings-divider"></div>
+
+                          <label class="field">
+                            <span>Updater endpoint</span>
+                            <input
+                              id="updater-endpoint"
+                              type="text"
+                              placeholder="https://github.com/OWNER/REPO/releases/latest/download/latest.json"
+                            />
+                          </label>
+
+                          <label class="field">
+                            <span>Updater public key</span>
+                            <textarea
+                              id="updater-public-key"
+                              rows="5"
+                              placeholder="Copia aqui la public key del updater de Tauri"
+                            ></textarea>
+                          </label>
+
+                          <div class="settings-pill settings-pill--muted">
+                            El auto update se ejecuta antes de abrir el launcher.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="settings-tab" data-settings-panel="info">
+                    <div class="settings-grid">
+                      <div class="settings-column">
+                        <div class="settings-section-title">Launcher</div>
+                        <div class="settings-card">
+                          <div class="meta-list">
+                            <div class="meta-row">
+                              <span>Cliente</span>
+                              <strong id="settings-app-version">Tavari Client</strong>
+                            </div>
+                            <div class="meta-row">
+                              <span>Cuenta</span>
+                              <strong id="settings-info-account">Sin sesion</strong>
+                            </div>
+                            <div class="meta-row">
+                              <span>Instancia activa</span>
+                              <strong id="settings-info-instance">-</strong>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="settings-column">
+                        <div class="settings-section-title">Creditos</div>
+                        <div class="settings-card">
+                          <div class="settings-credit">
+                            <div class="settings-credit__badge">SG</div>
+                            <div class="settings-credit__body">
+                              <strong>ShoutoGaming</strong>
+                              <span>Desarrollador principal</span>
+                            </div>
+                          </div>
+
+                          <p class="settings-copy">
+                            Launcher renovado en Tauri + Rust para Tavari
+                            Client, enfocado en velocidad y seguridad.
+                          </p>
+
+                          <div class="settings-pill settings-pill--muted">
+                            Tavari Studios
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                  </div>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <template id="instance-template">
+      <button class="rail-instance" type="button">
+        <span class="rail-instance__art"></span>
+        <span class="sr-only rail-instance__name"></span>
+      </button>
+    </template>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

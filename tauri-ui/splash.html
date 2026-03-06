@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tavari Client</title>
+    <link rel="stylesheet" href="./splash.css" />
+  </head>
+  <body>
+    <main class="splash-shell">
+      <div class="splash-noise"></div>
+
+      <section class="splash-card">
+        <div class="splash-brand">
+          <div class="splash-logo-wrap">
+            <img
+              class="splash-logo"
+              src="./assets/tavari-logo.png"
+              alt="Logo de Tavari Client"
+            />
+          </div>
+
+          <div class="splash-copy">
+            <span class="eyebrow">TAVARI STUDIOS</span>
+            <h1>Tavari Client</h1>
+            <p id="startup-stage">Iniciando launcher</p>
+          </div>
+        </div>
+
+        <div class="splash-progress">
+          <div class="splash-progress__track">
+            <div class="splash-progress__fill is-indeterminate" id="startup-progress"></div>
+          </div>
+          <div class="splash-progress__meta">
+            <span id="startup-detail">Preparando Tavari Client.</span>
+            <strong id="startup-percent">...</strong>
+          </div>
+        </div>
+
+        <div class="splash-footer">
+          <div class="loading-dots" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <span class="splash-version" id="startup-version">Loading</span>
+        </div>
+      </section>
+    </main>
+
+    <script src="./splash.js" type="module"></script>
+  </body>
+</html>
