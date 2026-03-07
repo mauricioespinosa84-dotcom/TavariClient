@@ -1252,6 +1252,87 @@ fn emit_launch_log_progress(app: &AppHandle, instance_key: &str, line: &str) {
     }
 }
 
+fn read_recent_text_file(path: &Path, max_age: Duration) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    if modified.elapsed().ok()?.gt(&max_age) {
+        return None;
+    }
+
+    fs::read_to_string(path).ok()
+}
+
+fn read_latest_recent_file_from_dir(dir: &Path, max_age: Duration) -> Option<String> {
+    let mut latest: Option<(SystemTime, PathBuf)> = None;
+
+    for entry in fs::read_dir(dir).ok()? {
+        let entry = entry.ok()?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let modified = entry.metadata().ok()?.modified().ok()?;
+        if modified.elapsed().ok()?.gt(&max_age) {
+            continue;
+        }
+
+        if latest
+            .as_ref()
+            .is_none_or(|(current_modified, _)| modified > *current_modified)
+        {
+            latest = Some((modified, path));
+        }
+    }
+
+    let (_, path) = latest?;
+    fs::read_to_string(path).ok()
+}
+
+fn detect_known_launch_conflict(report: &str) -> Option<String> {
+    let normalized = report.to_ascii_lowercase();
+
+    if normalized.contains("veil.performance.mixins.json")
+        && normalized.contains("net.vulkanmod")
+        && normalized.contains("lightsrender")
+    {
+        return Some(
+            "Conflicto de mods detectado entre Veil, VulkanMod y Lightsrender. Revisa esa combinacion en el backend."
+                .to_string(),
+        );
+    }
+
+    if normalized.contains("vulkanmod") && normalized.contains("mixinapplyerror") {
+        return Some(
+            "VulkanMod entro en conflicto con otro mod cliente durante el arranque.".to_string(),
+        );
+    }
+
+    if normalized.contains("lightsrender")
+        && normalized.contains("could not execute entrypoint stage 'client'")
+    {
+        return Some(
+            "Lightsrender no pudo iniciar correctamente el cliente. Revisa sus dependencias en el backend."
+                .to_string(),
+        );
+    }
+
+    None
+}
+
+fn diagnose_launch_failure(game_dir: &Path) -> Option<String> {
+    let max_age = Duration::from_secs(300);
+
+    read_latest_recent_file_from_dir(&game_dir.join("crash-reports"), max_age)
+        .as_deref()
+        .and_then(detect_known_launch_conflict)
+        .or_else(|| {
+            read_recent_text_file(&game_dir.join("logs").join("latest.log"), max_age)
+                .as_deref()
+                .and_then(detect_known_launch_conflict)
+        })
+}
+
 async fn drain_game_output<R>(app: AppHandle, instance_key: String, mut reader: R)
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -1345,13 +1426,16 @@ async fn monitor_running_game(
                     }
                 } else {
                     let exit_code = status.code().unwrap_or(-1);
-                    (
-                        "error",
-                        "Minecraft finalizo con error",
+                    let detail = diagnose_launch_failure(&running_game.game_dir).unwrap_or_else(|| {
                         format!(
                             "{} termino con codigo de salida {exit_code}.",
                             running_game.instance_name
-                        ),
+                        )
+                    });
+                    (
+                        "error",
+                        "Minecraft finalizo con error",
+                        detail,
                         None,
                     )
                 };

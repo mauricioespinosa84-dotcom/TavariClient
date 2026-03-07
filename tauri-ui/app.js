@@ -20,7 +20,10 @@ const state = {
   gameLifecycleStatus: "idle",
   currentGameInstanceKey: null,
   backendPollInFlight: false,
-  lastBackendPollAt: 0
+  lastBackendPollAt: 0,
+  notificationsOpen: false,
+  notificationsUnread: 0,
+  notifications: []
 };
 
 const BACKEND_POLL_INTERVAL_MS = 10000;
@@ -31,6 +34,11 @@ const els = {
   dashboardView: document.querySelector("#dashboard-view"),
   loginBrandText: document.querySelector("#login-brand-text"),
   windowBrandText: document.querySelector("#window-brand-text"),
+  notificationsBtn: document.querySelector("#notifications-btn"),
+  notificationBadge: document.querySelector("#notification-badge"),
+  notificationsPanel: document.querySelector("#notifications-panel"),
+  notificationsList: document.querySelector("#notifications-list"),
+  clearNotificationsBtn: document.querySelector("#clear-notifications-btn"),
   loginStatusTitle: document.querySelector("#login-status-title"),
   loginStatusDetail: document.querySelector("#login-status-detail"),
   statusTitle: document.querySelector("#status-title"),
@@ -141,6 +149,87 @@ const setStatus = (title, detail) => {
   els.loginStatusDetail.textContent = detail;
   els.statusTitle.textContent = title;
   els.statusDetail.textContent = detail;
+};
+
+const formatNotificationTimestamp = (timestamp) => {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "Ahora";
+  }
+
+  return date.toLocaleTimeString("es-MX", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+};
+
+const renderNotifications = () => {
+  const unread = state.notificationsUnread;
+  els.notificationBadge.textContent = unread > 9 ? "9+" : String(unread);
+  els.notificationBadge.classList.toggle("is-hidden", unread <= 0);
+  els.notificationsPanel.classList.toggle("is-open", state.notificationsOpen);
+  els.notificationsPanel.setAttribute("aria-hidden", String(!state.notificationsOpen));
+  els.notificationsBtn.setAttribute("aria-expanded", String(state.notificationsOpen));
+  els.notificationsList.innerHTML = "";
+
+  if (!state.notifications.length) {
+    const empty = document.createElement("div");
+    empty.className = "notifications-panel__empty";
+    empty.textContent = "Sin notificaciones por ahora.";
+    els.notificationsList.appendChild(empty);
+    return;
+  }
+
+  state.notifications.forEach((notification) => {
+    const article = document.createElement("article");
+    const title = document.createElement("strong");
+    const detail = document.createElement("p");
+    const time = document.createElement("time");
+
+    article.className = "notifications-panel__item";
+    title.textContent = notification.title;
+    detail.textContent = notification.detail;
+    time.textContent = formatNotificationTimestamp(notification.timestamp);
+
+    article.append(title, detail, time);
+    els.notificationsList.appendChild(article);
+  });
+};
+
+const setNotificationsOpen = (open) => {
+  state.notificationsOpen = open;
+
+  if (open) {
+    state.notificationsUnread = 0;
+  }
+
+  renderNotifications();
+};
+
+const pushNotification = (title, detail) => {
+  const previous = state.notifications[0];
+  if (
+    previous &&
+    previous.title === title &&
+    previous.detail === detail &&
+    Date.now() - previous.timestamp < 15000
+  ) {
+    return;
+  }
+
+  state.notifications.unshift({
+    id: crypto.randomUUID(),
+    title,
+    detail,
+    timestamp: Date.now()
+  });
+  state.notifications = state.notifications.slice(0, 10);
+
+  if (!state.notificationsOpen) {
+    state.notificationsUnread += 1;
+  }
+
+  renderNotifications();
 };
 
 const clampProgress = (value) => {
@@ -717,6 +806,10 @@ const refreshBootstrapSilently = async () => {
 
   if (changed && state.gameLifecycleStatus === "idle") {
     setStatus("Backend actualizado", "Se detectaron cambios nuevos en el backend.");
+    pushNotification(
+      "Launcher actualizado",
+      "Se detectaron cambios nuevos en el backend y el launcher ya refresco los datos."
+    );
   }
 };
 
@@ -807,6 +900,17 @@ els.toggleSettingsBtn.addEventListener("click", () => {
   setSettingsOpen(!state.settingsOpen);
 });
 
+els.notificationsBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setNotificationsOpen(!state.notificationsOpen);
+});
+
+els.clearNotificationsBtn.addEventListener("click", () => {
+  state.notifications = [];
+  state.notificationsUnread = 0;
+  renderNotifications();
+});
+
 els.closeSettingsBtn.addEventListener("click", () => {
   setSettingsOpen(false);
 });
@@ -882,13 +986,31 @@ await listen("game-lifecycle", (event) => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.settingsOpen) {
-    setSettingsOpen(false);
+  if (event.key === "Escape") {
+    if (state.notificationsOpen) {
+      setNotificationsOpen(false);
+      return;
+    }
+
+    if (state.settingsOpen) {
+      setSettingsOpen(false);
+    }
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (
+    state.notificationsOpen &&
+    !els.notificationsPanel.contains(event.target) &&
+    !els.notificationsBtn.contains(event.target)
+  ) {
+    setNotificationsOpen(false);
   }
 });
 
 setActiveSettingsTab(state.activeSettingsTab);
 applyAdaptiveScale();
+renderNotifications();
 
 window.addEventListener("resize", applyAdaptiveScale);
 window.visualViewport?.addEventListener("resize", applyAdaptiveScale);
