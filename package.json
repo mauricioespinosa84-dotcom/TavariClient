@@ -1,7 +1,7 @@
 {
   "name": "tavari-client",
   "productName": "Tavari Client",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "Launcher rapido en Rust y Tauri para Tavari Studios",
   "author": {
     "name": "ShoutoGaming",

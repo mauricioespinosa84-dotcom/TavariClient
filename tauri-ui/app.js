@@ -257,12 +257,26 @@ const resetGameLifecycle = () => {
 };
 
 const applyGameLifecycle = (payload) => {
+  const nextStatus = payload.status || "idle";
+  const sameGame =
+    !payload.instanceKey ||
+    !state.currentGameInstanceKey ||
+    payload.instanceKey === state.currentGameInstanceKey;
+
+  if (
+    state.gameLifecycleStatus === "running" &&
+    nextStatus === "launching" &&
+    sameGame
+  ) {
+    return;
+  }
+
   if (payload.instanceKey && state.selectedInstanceKey && payload.instanceKey !== state.selectedInstanceKey) {
     state.selectedInstanceKey = payload.instanceKey;
     renderInstances(state.bootstrap?.instances || []);
   }
 
-  state.gameLifecycleStatus = payload.status || "idle";
+  state.gameLifecycleStatus = nextStatus;
   state.currentGameInstanceKey = payload.instanceKey || state.currentGameInstanceKey;
 
   setStatus(payload.stage || "Lanzando", payload.detail || "Preparando cliente.");
